@@ -1,0 +1,48 @@
+name: Build check
+
+# extension.js is NOT committed (it's the generated bundle; CI builds it into the
+# release .zip - see release.yml). This job guards the SOURCE: it builds the
+# bundle from src/, fails if the build breaks or the output isn't valid JS, and
+# runs the self-checks.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "src/**"
+      - "build.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - "jsconfig.json"
+      - "tedi.d.ts"
+  pull_request:
+    paths:
+      - "src/**"
+      - "build.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - "jsconfig.json"
+      - "tedi.d.ts"
+  workflow_dispatch:
+
+jobs:
+  build-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+      - name: Install build tooling
+        run: npm ci
+      - name: Build extension.js from src/
+        run: node build.mjs
+      - name: Syntax check the built bundle
+        run: node --check extension.js
+      # `checkJs` is on, so `tedi.d.ts` actually bites: a typo in a `ctx.*` call
+      # is a build failure here rather than a runtime TypeError inside an async
+      # click handler, which is how an extension breaks invisibly.
+      - name: Typecheck against tedi.d.ts
+        run: npm run typecheck
+      - name: Self-checks
+        run: npm test

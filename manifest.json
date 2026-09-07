@@ -1,0 +1,130 @@
+{
+  "$schema": "./manifest.schema.json",
+  "id": "tedi.devenv",
+  "name": "Dev Environment",
+  "version": "0.1.0",
+  "description": "A complete local development environment managed from inside TEDI: the Laragon replacement, on Windows, macOS and Linux. Downloads and manages its own PHP, Node.js, MySQL, MariaDB, PostgreSQL, Redis, Nginx, Apache and Composer, none of it shared with anything already on the machine. PHP and Node.js install side by side at any number of versions, and a project pins its own without touching the global default, so a terminal opened in that project resolves the runtime the project asked for. Virtual hosts are generated per project with a configurable suffix, HTTPS is issued from a local CA that is trusted once, hosts entries are written for you under a single elevation prompt, and ports are allocated around whatever is already listening. Nothing is hardcoded: every version list, download URL and path is metadata resolved at runtime.",
+  "author": "IlhamRiski - ilhamriski.com",
+  "homepage": "https://tedi.ilhamriski.com/",
+  "icon": "logo.png",
+  "main": "extension.js",
+  "permissions": [
+    "panels:register",
+    "terminal:path",
+    "tabs:open",
+    "statusbar:write",
+    "settings:read",
+    "settings:write",
+    "ui:toast",
+    "invoke:shell_run_command",
+    "invoke:shell_bg_spawn_direct",
+    "invoke:shell_bg_logs",
+    "invoke:shell_bg_kill",
+    "invoke:shell_bg_list",
+    "invoke:shell_bg_remove",
+    "invoke:port_is_open",
+    "invoke:fs_read_file",
+    "invoke:fs_write_file",
+    "invoke:fs_read_dir",
+    "invoke:fs_create_dir",
+    "invoke:fs_delete",
+    "invoke:fs_rename",
+    "invoke:fs_canonicalize"
+  ],
+  "engines": {
+    "tedi": ">=0.4.7"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "id": "tedi.devenv.open",
+        "title": "Open Dev Environment",
+        "category": "Dev Environment"
+      },
+      {
+        "id": "tedi.devenv.startAll",
+        "title": "Start all services",
+        "category": "Dev Environment"
+      },
+      {
+        "id": "tedi.devenv.stopAll",
+        "title": "Stop all services",
+        "category": "Dev Environment"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "tedi.devenv.open",
+        "key": "Mod+Alt+E"
+      }
+    ],
+    "panels": [
+      {
+        "id": "devenv",
+        "title": "Dev Environment",
+        "surface": "tab",
+        "icon": "lucide:Server",
+        "toggleCommand": "tedi.devenv.open"
+      }
+    ],
+    "settings": [
+      {
+        "id": "rootDir",
+        "type": "string",
+        "label": "Data directory",
+        "description": "Where runtimes, services, certificates and generated config live. Blank uses ~/.tedi/devenv. Moving this does not migrate an existing install."
+      },
+      {
+        "id": "domainSuffix",
+        "type": "string",
+        "label": "Default domain suffix",
+        "description": "Appended to a project name to form its local domain, e.g. \"test\" gives project-a.test. A project can override its own.",
+        "default": "test"
+      },
+      {
+        "id": "webServer",
+        "type": "select",
+        "label": "Web server",
+        "description": "Which server serves the virtual hosts.",
+        "default": "nginx",
+        "options": [
+          {
+            "value": "nginx",
+            "label": "Nginx"
+          },
+          {
+            "value": "apache",
+            "label": "Apache"
+          }
+        ]
+      },
+      {
+        "id": "httpPort",
+        "type": "number",
+        "label": "HTTP port",
+        "description": "Port 80 needs elevation on macOS and Linux. Any port above 1024 does not.",
+        "default": 80
+      },
+      {
+        "id": "httpsPort",
+        "type": "number",
+        "label": "HTTPS port",
+        "default": 443
+      },
+      {
+        "id": "autoHttps",
+        "type": "boolean",
+        "label": "Issue HTTPS certificates automatically",
+        "description": "Generates a local CA on first use and a certificate per domain. The CA is trusted once, per machine.",
+        "default": true
+      },
+      {
+        "id": "manageHosts",
+        "type": "boolean",
+        "label": "Manage the hosts file",
+        "description": "Writes project domains into a delimited block in the system hosts file. Every change is applied under one elevation prompt.",
+        "default": true
+      }
+    ]
+  }
+}

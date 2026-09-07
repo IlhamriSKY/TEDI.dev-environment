@@ -1,0 +1,22 @@
+# Enforce LF for source files regardless of platform (Windows autocrlf safe).
+#
+# The other extension repos have no .gitattributes and happen to hold LF, which
+# lasts exactly until a checkout on a machine with core.autocrlf=true rewrites
+# the working tree - tedi.ai-usage has already drifted that way. Prettier and the
+# self-checks here both expect LF, so it is declared rather than left to luck.
+* text=auto eol=lf
+
+# Source
+*.js    text eol=lf
+*.mjs   text eol=lf
+*.cjs   text eol=lf
+*.ts    text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+
+# Binary: never touched, never diffed as text.
+*.png   binary
+*.ico   binary
+*.zip   binary
