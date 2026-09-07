@@ -9,7 +9,7 @@
 // getting it wrong recommends a release ten patches old and nobody notices.
 
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -248,6 +248,43 @@ function runShim(cwd, file) {
   return { code: res.status ?? -1, out: `${res.stdout ?? ""}${res.stderr ?? ""}` };
 }
 
+/**
+ * What the shim prints when the walk and the fallback both came up empty. That
+ * message - not an exit code - is the thing these tests are actually about.
+ *
+ * The tests used to assert `code !== 127`, on the reasoning that 127 is the
+ * shim's own "nothing is configured" exit. That holds on Windows and is WRONG on
+ * POSIX: `sh` also exits 127 when the exec target is missing ("exec: .../php:
+ * not found"), so the two states the assertion separates produce the same
+ * number, and all three tests failed the first time CI ran them on Linux.
+ */
+const UNCONFIGURED = /no PHP_BIN is configured/i;
+
+/**
+ * A runtime directory the shim can resolve, and on POSIX actually execute.
+ *
+ * POSIX gets a real `php` script, so the test proves the resolved path is not
+ * merely computed but RUN. Windows shims exec `php.exe` specifically, and a
+ * genuine one cannot be fabricated here - so there the assertion stays at "the
+ * shim resolved something instead of giving up", which is what it can honestly
+ * check.
+ *
+ * @param {string} dir @param {string} marker @returns {string} the dir
+ */
+function fakeRuntime(dir, marker) {
+  mkdirSync(dir, { recursive: true });
+  if (process.platform !== "win32") {
+    const exe = join(dir, "php");
+    writeFileSync(exe, `#!/bin/sh\necho ${marker}\n`);
+    chmodSync(exe, 0o755);
+  }
+  return dir;
+}
+
+/** True when the shim ran the fake and it printed its marker. POSIX only. */
+const ranMarker = (out, marker) =>
+  process.platform === "win32" ? true : new RegExp(marker).test(out);
+
 const shimFile = join(shimsDir, process.platform === "win32" ? "php.cmd" : "php");
 writeFileSync(shimFile, process.platform === "win32" ? windowsShim(phpShim) : posixShim(phpShim));
 
@@ -259,35 +296,35 @@ test("reports a clear error, and exit 127, when nothing is configured", () => {
 
 test("walks UP from the working directory to find .tedi-runtime", () => {
   // The file sits three levels above where the command runs.
+  fakeRuntime(join(tmp, "fake-php"), "FAKE_PHP_RAN");
   writeFileSync(
     join(tmp, "project", ".tedi-runtime"),
     "# generated\nPHP_BIN=" + join(tmp, "fake-php") + "\n",
   );
-  const { code, out } = runShim(nested, shimFile);
-  // There is no real php binary there, so it must FAIL - but it must fail
-  // having resolved our path, which is what proves the walk and the parse.
-  assert.notEqual(code, 127, `did not resolve the parent's runtime file: ${out}`);
-  assert.ok(
-    out.toLowerCase().includes("fake-php") || code !== 0,
-    `expected an attempt to run the resolved path, got: ${out}`,
-  );
+  const { out } = runShim(nested, shimFile);
+  assert.doesNotMatch(out, UNCONFIGURED, `did not resolve the parent's runtime file: ${out}`);
+  assert.ok(ranMarker(out, "FAKE_PHP_RAN"), `resolved a path but did not run it: ${out}`);
 });
 
 test("falls back to global.env when no project declares one", () => {
   rmSync(join(tmp, "project", ".tedi-runtime"));
+  fakeRuntime(join(tmp, "global-php"), "GLOBAL_PHP_RAN");
   writeFileSync(join(tmp, "global.env"), "PHP_BIN=" + join(tmp, "global-php") + "\n");
-  const { code, out } = runShim(nested, shimFile);
-  assert.notEqual(code, 127, `fallback to global.env did not happen: ${out}`);
+  const { out } = runShim(nested, shimFile);
+  assert.doesNotMatch(out, UNCONFIGURED, `fallback to global.env did not happen: ${out}`);
+  assert.ok(ranMarker(out, "GLOBAL_PHP_RAN"), `fell back but did not run it: ${out}`);
 });
 
 test("a comment line in the runtime file is not parsed as a key", () => {
+  fakeRuntime(join(tmp, "right"), "RIGHT_PHP_RAN");
   writeFileSync(
     join(tmp, "project", ".tedi-runtime"),
     "# PHP_BIN=C:\\wrong\\commented\nPHP_BIN=" + join(tmp, "right") + "\n",
   );
-  const { out, code } = runShim(nested, shimFile);
+  const { out } = runShim(nested, shimFile);
   assert.ok(!out.includes("commented"), `used a commented-out line: ${out}`);
-  assert.notEqual(code, 127);
+  assert.doesNotMatch(out, UNCONFIGURED, `the commented line broke the parse: ${out}`);
+  assert.ok(ranMarker(out, "RIGHT_PHP_RAN"), `did not run the uncommented value: ${out}`);
 });
 
 rmSync(tmp, { recursive: true, force: true });
