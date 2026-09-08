@@ -67,6 +67,23 @@ export function compareVersions(a, b) {
 }
 
 /**
+ * Is this version a prerelease - an RC, beta, alpha or dev build?
+ *
+ * Split the SAME way `compareVersions` splits it, and for the same reason: that
+ * function already ranks a suffixed version below the plain one, and a badge
+ * that called something stable while the sorter treated it as a prerelease
+ * would be two answers to one question. Anything after the first `-` or `+` is
+ * the prerelease part, which is what SemVer says and what every index here
+ * follows (`8.5.0RC1` is spelled `8.5.0-RC1` by php.net).
+ *
+ * @param {string} version @returns {boolean}
+ */
+export function isPrerelease(version) {
+  const [, ...rest] = String(version).split(/[-+]/);
+  return rest.join("-").length > 0;
+}
+
+/**
  * Is this a version string we are willing to put in a path or a URL?
  *
  * Every version here arrives from a REMOTE index, and it is then interpolated

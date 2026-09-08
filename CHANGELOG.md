@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.3
+
+- **The install picker can be searched, and says what each version is.** It
+  listed the newest sixty and nothing else, so a version an older project pins
+  could be named by its own index and still be impossible to pick. The search
+  filters the whole list and the cap applies after it - Node alone publishes
+  several hundred. Every row now carries what it is, as a glyph AND a word:
+  **Installed** if it is already on disk, **Recommended** for what the project
+  itself calls current, **LTS**, and **Stable** or **Prerelease**. That last one
+  is the distinction the list could not make at all: a release candidate sorted
+  below its own release and then sat there looking identical to it. Colour is
+  used only where it means something - green for what you already have, amber
+  for the one choice with a consequence - and the date each project states is
+  beside it, because two versions a year apart is the thing a bare number cannot
+  tell you.
+
 ## 0.1.2
 
 - **Scheduled jobs.** A **Cron** section, and a scheduler that runs while the

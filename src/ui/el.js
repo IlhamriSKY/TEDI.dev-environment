@@ -610,16 +610,37 @@ export function muted(text) {
   });
 }
 
-/** A small pill, for versions and ports. @param {string} text @returns {HTMLElement} */
-export function pill(text) {
-  return h("span", {
-    text,
-    title: text,
-    style:
-      `display:inline-block;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;` +
-      `padding:2px 9px;border-radius:${PILL};background:var(--muted);` +
-      `color:var(--muted-foreground);font-size:10px;font-family:ui-monospace,monospace`,
-  });
+/**
+ * A small pill, for versions and ports.
+ *
+ * `icon` turns it into a labelled badge, and `colour` tints both the glyph and
+ * the text. Colour is never the only carrier: a badge that means something
+ * always says so in words beside the glyph, for the same reason `status()`
+ * stopped being a coloured square.
+ *
+ * @param {string} text
+ * @param {{ icon?: string, colour?: string, title?: string }} [opts]
+ * @returns {HTMLElement}
+ */
+export function pill(text, opts = {}) {
+  const colour = opts.colour ?? "var(--muted-foreground)";
+  return h(
+    "span",
+    {
+      title: opts.title ?? text,
+      style:
+        `display:inline-flex;align-items:center;gap:4px;max-width:340px;white-space:nowrap;` +
+        `padding:2px 9px;border-radius:${PILL};background:var(--muted);` +
+        `color:${colour};font-size:10px;font-family:ui-monospace,monospace`,
+    },
+    [
+      opts.icon ? icon(opts.icon, colour, 11) : null,
+      h("span", {
+        text,
+        style: "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0",
+      }),
+    ],
+  );
 }
 
 /** The shared uppercase section label.

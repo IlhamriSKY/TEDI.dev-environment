@@ -7,11 +7,24 @@
 // that sometimes takes 200ms and sometimes takes four minutes trains people to
 // be afraid of it.
 
-import { h, row, pill, muted, button, dropdown, section, mark, modal, progress } from "./el.js";
+import {
+  h,
+  row,
+  pill,
+  muted,
+  button,
+  dropdown,
+  section,
+  mark,
+  modal,
+  progress,
+  textInput,
+} from "./el.js";
 import { openPhpConfig } from "./php-view.js";
 import { openPackagers } from "./packagers-view.js";
 import { markFor } from "./marks.js";
 import { providers } from "../registry/index.js";
+import { isPrerelease } from "../registry/util.js";
 import { installedOf } from "../manager/versions.js";
 import { activeVersion, setActiveVersion } from "../manager/config.js";
 import { install, uninstall } from "../manager/install.js";
@@ -243,49 +256,122 @@ function pickVersion(p, list) {
     /** @type {{ close: () => void }} */
     let dialog;
 
-    const items = list.slice(0, 60).map((v) =>
-      h(
-        "button",
-        {
-          style:
-            "display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:6px 10px;" +
-            "border:0;border-radius:999px;background:transparent;color:var(--foreground);" +
-            "font-size:11.5px;cursor:pointer",
-          on: {
-            click: () => {
-              finish(v.version);
-              dialog.close();
-            },
-            mouseenter: (ev) => {
-              /** @type {HTMLElement} */ (ev.currentTarget).style.background = "var(--accent)";
-            },
-            mouseleave: (ev) => {
-              /** @type {HTMLElement} */ (ev.currentTarget).style.background = "transparent";
-            },
-          },
-        },
-        [
-          h("span", { text: v.version, style: "font-family:ui-monospace,monospace;flex:1" }),
-          v.channel === "lts" ? pill("LTS") : null,
-          v.recommended ? pill("recommended") : null,
-          have.has(v.version) ? muted("installed") : null,
-        ],
-      ),
-    );
+    const results = h("div", {
+      style: "overflow:auto;display:flex;flex-direction:column;gap:1px;max-height:46vh",
+    });
+
+    const field = textInput(`Search ${list.length} version${list.length === 1 ? "" : "s"}`);
+
+    /**
+     * Redraw the list for what is typed.
+     *
+     * The cap is applied AFTER filtering, which is the whole point of the
+     * search: the list used to be sliced to the newest 60 and nothing else was
+     * reachable, so a project pinned to an older release could be listed by its
+     * own index and still impossible to pick here. Node alone publishes several
+     * hundred.
+     */
+    const draw = () => {
+      const q = field.value.trim().toLowerCase();
+      const hits = (q ? list.filter((v) => v.version.toLowerCase().includes(q)) : list).slice(0, 60);
+      results.replaceChildren(...hits.map((v) => versionRow(v, have.has(v.version), finish, () => dialog.close())));
+      if (hits.length === 0) results.append(muted("No version matches that."));
+    };
+
+    field.addEventListener("input", draw);
+    draw();
 
     dialog = modal({
       title: h("span", { style: "display:flex;align-items:center;gap:8px" }, [
         mark(logo, 16),
         h("strong", { text: `Install ${p.label}`, style: "font-size:13px;font-weight:500" }),
       ]),
-      body: h(
-        "div",
-        { style: "overflow:auto;display:flex;flex-direction:column;gap:1px;max-height:46vh" },
-        items,
-      ),
+      body: h("div", { style: "display:flex;flex-direction:column;gap:9px;min-height:0" }, [
+        field,
+        results,
+      ]),
       // Escape and the backdrop must resolve too, or the caller waits on a
       // dialog that is no longer on screen.
       onClose: () => finish(null),
     });
+    field.focus();
   });
+}
+
+/**
+ * What a version is, in badges.
+ *
+ * Four facts, and each is a glyph AND a word: which one you already have, which
+ * one this project recommends, which are long-term support, and which are
+ * finished releases rather than release candidates. The last is the one the
+ * list could not say before - a prerelease sorted below its own release and
+ * then sat in the picker looking identical to it.
+ *
+ * Colour is used only where it means something. Installed is green because it
+ * answers "do I need to do anything"; a prerelease is amber because it is the
+ * one choice with a consequence; stable and LTS are muted, because they are the
+ * normal case and a list where every row shouts says nothing.
+ *
+ * @param {import("../registry/index.js").VersionInfo} v
+ * @param {boolean} installed
+ * @param {(value: string) => void} finish
+ * @param {() => void} close
+ * @returns {HTMLElement}
+ */
+function versionRow(v, installed, finish, close) {
+  const pre = isPrerelease(v.version);
+  return h(
+    "button",
+    {
+      style:
+        "display:flex;align-items:center;gap:6px;width:100%;text-align:left;padding:6px 10px;" +
+        "border:0;border-radius:999px;background:transparent;color:var(--foreground);" +
+        "font-size:11.5px;cursor:pointer",
+      on: {
+        click: () => {
+          finish(v.version);
+          close();
+        },
+        mouseenter: (ev) => {
+          /** @type {HTMLElement} */ (ev.currentTarget).style.background = "var(--accent)";
+        },
+        mouseleave: (ev) => {
+          /** @type {HTMLElement} */ (ev.currentTarget).style.background = "transparent";
+        },
+      },
+    },
+    [
+      h("span", {
+        text: v.version,
+        style: "font-family:ui-monospace,monospace;flex:1;min-width:0",
+      }),
+      installed
+        ? pill("Installed", {
+            icon: "lucide:HardDrive",
+            colour: "var(--tedi-icon-idle, #34d399)",
+            title: "Already downloaded into this environment",
+          })
+        : null,
+      v.recommended
+        ? pill("Recommended", {
+            icon: "lucide:Star",
+            colour: "var(--primary)",
+            title: "What this project itself calls current",
+          })
+        : null,
+      v.channel === "lts"
+        ? pill("LTS", { icon: "lucide:ShieldCheck", title: "Long-term support release" })
+        : null,
+      pre
+        ? pill("Prerelease", {
+            icon: "lucide:FlaskConical",
+            colour: "var(--tedi-icon-working, #facc15)",
+            title: "A release candidate or beta, not a finished release",
+          })
+        : pill("Stable", { icon: "lucide:CircleCheck", title: "A finished release" }),
+      // The date the project itself states, when it states one. Two versions a
+      // year apart is the thing a bare number cannot tell you.
+      v.released ? muted(String(v.released).slice(0, 10)) : null,
+    ],
+  );
 }

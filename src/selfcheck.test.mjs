@@ -22,7 +22,7 @@ import { matches, isValidSchedule, splitCommand } from "./manager/cron.js";
 import { loadModuleLines } from "./web/serverroot.js";
 import { serverPorts } from "./web/ports.js";
 import { setDirective, getDirective } from "./manager/phpini.js";
-import { compareVersions, majorMinor } from "./registry/util.js";
+import { compareVersions, majorMinor, isPrerelease } from "./registry/util.js";
 import { versionSatisfies } from "./project/resolve.js";
 import { slug } from "./project/projects.js";
 import { fastcgiPort } from "./web/vhost.js";
@@ -131,6 +131,19 @@ test("differing segment counts compare as if zero-padded", () => {
 test("majorMinor takes the branch", () => {
   assert.equal(majorMinor("8.3.14"), "8.3");
   assert.equal(majorMinor("26.7.0"), "26.7");
+});
+
+test("the Stable badge agrees with the sorter about what a prerelease is", () => {
+  // Two answers to one question is the bug this guards: `compareVersions`
+  // already ranks a suffixed version below the plain one, so a picker calling
+  // that same version Stable would contradict the order it was listed in.
+  for (const v of ["8.4.0-RC1", "8.5.0-beta2", "1.2.3-alpha", "20.0.0-nightly", "3.0.0+build1"]) {
+    assert.ok(isPrerelease(v), `${v} should read as a prerelease`);
+    assert.ok(compareVersions(v.split(/[-+]/)[0], v) < 0, `${v} should sort below its release`);
+  }
+  for (const v of ["8.4.0", "1.2.3", "26.7.0", "2.10.3"]) {
+    assert.ok(!isPrerelease(v), `${v} should read as stable`);
+  }
 });
 
 console.log("\nproject runtime matching");
