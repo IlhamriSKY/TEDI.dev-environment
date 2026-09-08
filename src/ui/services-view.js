@@ -69,14 +69,22 @@ export function servicesView(refresh) {
   // see.
   const aside = h("div", { style: "display:flex;align-items:center;gap:6px" }, [
     muted(pools.length ? `PHP FastCGI: ${pools.join(", ")}` : "No PHP worker running"),
-    button("Start all", async () => {
-      await startAll();
-      refresh();
-    }),
-    button("Stop all", async () => {
-      await stopAll();
-      refresh();
-    }),
+    button(
+      "Start all",
+      async () => {
+        await startAll();
+        refresh();
+      },
+      { variant: "success", icon: "lucide:Play" },
+    ),
+    button(
+      "Stop all",
+      async () => {
+        await stopAll();
+        refresh();
+      },
+      { variant: "danger", icon: "lucide:Square" },
+    ),
   ]);
 
   return section("Services", rows, aside);
@@ -391,10 +399,14 @@ function serviceRow(id, refresh) {
         })
       : null,
     running
-      ? button("Stop", async () => {
-          await stop(id);
-          refresh();
-        })
+      ? button(
+          "Stop",
+          async () => {
+            await stop(id);
+            refresh();
+          },
+          { variant: "danger", icon: "lucide:Square" },
+        )
       : button(
           "Start",
           async () => {
@@ -402,13 +414,19 @@ function serviceRow(id, refresh) {
             if (s.state === "error" && s.error) ctx?.ui.toast(s.error, { variant: "error" });
             refresh();
           },
-          { variant: "primary", disabled },
+          { variant: "success", icon: "lucide:Play", disabled },
         ),
     running
-      ? button("Restart", async () => {
-          await restart(id);
-          refresh();
-        })
+      ? button(
+          "Restart",
+          async () => {
+            await restart(id);
+            refresh();
+          },
+          // Amber: it stops the thing before it starts it, which is neither of
+          // the other two answers.
+          { variant: "warn", icon: "lucide:RotateCw" },
+        )
       : null,
   ]);
 

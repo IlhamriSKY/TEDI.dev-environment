@@ -18,18 +18,6 @@ import { forgetCertificate } from "../web/certs.js";
 
 /** @typedef {import("../runtime.js").Project} Project */
 
-/** Files that mark a directory as a project worth offering to register.
- *  Ordered by how strongly each implies "this is an app", not alphabetically. */
-const MARKERS = [
-  "composer.json",
-  "package.json",
-  "artisan",
-  "wp-config.php",
-  "index.php",
-  "public/index.php",
-  "index.html",
-];
-
 /** @returns {Promise<Project[]>} */
 export async function loadProjects() {
   /** @type {{ projects?: Project[] }} */
@@ -161,12 +149,21 @@ export async function removeProject(id) {
 }
 
 /**
- * Folders under `parent` that look like projects and are not registered yet.
+ * Folders under `parent` that are not registered yet.
  *
- * One level deep only. A recursive scan of a projects directory would walk into
- * `node_modules` and `vendor`, which is thousands of directories and seconds of
- * IO for no benefit: nobody nests the app they are working on three levels
- * inside another app.
+ * EVERY directory, not only the ones carrying a `composer.json` or a
+ * `package.json`. The marker list was right while this scanned any folder the
+ * user pointed it at - there it had to guess which of your Documents were apps -
+ * and wrong now that it only ever scans the environment's own `www`. A folder
+ * in there is a project by virtue of being in there: that is what the folder is
+ * for, and an empty one you are about to clone into is exactly the case where
+ * having the domain and the certificate already issued is worth something. A
+ * scan that answered "nothing new" about a folder you had just put there was
+ * reporting its own guess as a fact.
+ *
+ * One level deep only. A recursive scan would walk into `node_modules` and
+ * `vendor`, which is thousands of directories and seconds of IO for no benefit:
+ * nobody nests the app they are working on three levels inside another app.
  *
  * @param {string} parent
  * @returns {Promise<{ name: string, path: string }[]>}
@@ -176,27 +173,15 @@ export async function discoverProjects(parent) {
   const out = [];
   for (const entry of await readDir(parent, false)) {
     if (entry.kind !== "dir") continue;
+    // A dependency tree dropped at the top level, and anything a tool keeps its
+    // own state in. Neither is a site and both are common.
     if (entry.name === "node_modules" || entry.name === "vendor") continue;
+    if (entry.name.startsWith(".")) continue;
     const path = join(parent, entry.name);
     if (state.projects.some((p) => samePath(p.path, path))) continue;
-    if (await looksLikeProject(path)) out.push({ name: entry.name, path });
+    out.push({ name: entry.name, path });
   }
   return out;
-}
-
-/** @param {string} path @returns {Promise<boolean>} */
-async function looksLikeProject(path) {
-  const names = new Set((await readDir(path, false)).map((e) => e.name));
-  for (const marker of MARKERS) {
-    const [head, tail] = marker.split("/");
-    if (!tail) {
-      if (names.has(head)) return true;
-    } else if (names.has(head)) {
-      const inner = await readDir(join(path, head), false);
-      if (inner.some((e) => e.name === tail)) return true;
-    }
-  }
-  return false;
 }
 
 /** Rewrite `.tedi-runtime` for every project. Called after a global version

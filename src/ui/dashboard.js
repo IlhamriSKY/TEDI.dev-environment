@@ -16,7 +16,7 @@ import { h, button, muted, section, row, pill, icon, status, progress } from "./
 import { runtimesView } from "./runtimes-view.js";
 import { servicesView } from "./services-view.js";
 import { projectsView } from "./projects-view.js";
-import { settingsView } from "./settings-view.js";
+import { openSettings } from "./settings-view.js";
 import { state, config, ctx } from "../runtime.js";
 import { paths, layoutDirs } from "../core/paths.js";
 import { ensureDirs, isDir } from "../core/fsx.js";
@@ -101,12 +101,12 @@ async function paint(root, refresh, current) {
   // that they cannot work yet; a single screen that says what is left is both
   // shorter to read and shorter to write.
   if (blocked.length > 0) {
-    root.replaceChildren(header(false), setupCard(steps, blocked));
+    root.replaceChildren(header(false, refresh), setupCard(steps, blocked));
     return;
   }
 
   root.replaceChildren(
-    header(true),
+    header(true, refresh),
     section("Setup", steps.map(stepRow)),
     runtimesView(refresh),
     servicesView(refresh),
@@ -116,7 +116,7 @@ async function paint(root, refresh, current) {
   // appended when it resolves rather than holding the whole panel blank.
   const projects = await projectsView(refresh);
   if (!current()) return;
-  root.append(projects, settingsView(refresh));
+  root.append(projects);
 }
 
 /**
@@ -220,9 +220,9 @@ function stepRow(step) {
  * regenerates its config first. What is left for it to fix is a hosts file
  * somebody edited themselves, which is not a button on a dashboard.
  *
- * @param {boolean} ready @returns {HTMLElement}
+ * @param {boolean} ready @param {() => void} refresh @returns {HTMLElement}
  */
-function header(ready) {
+function header(ready, refresh) {
   return h(
     "div",
     { style: "display:flex;align-items:center;justify-content:space-between;gap:10px" },
@@ -235,10 +235,17 @@ function header(ready) {
             : "Not set up yet",
         ),
       ]),
-      // Nothing on the right. "Start all" and "Stop all" moved into the
-      // Services section, beside the rows they act on, and "Apply changes"
-      // is gone entirely - see `header`'s note.
-      null,
+      // "Start all" and "Stop all" are in the Services section, beside the rows
+      // they act on. What is up here is the two settings that belong to the
+      // whole environment rather than to any one row - and they are a dialog,
+      // not a section, because a pane you scroll to the bottom of to change the
+      // domain suffix twice a year is a pane whose last screenful is furniture.
+      ready
+        ? button("Settings", () => openSettings(refresh), {
+            icon: "lucide:Settings",
+            title: "Domain suffix and the hosts file",
+          })
+        : null,
     ],
   );
 }

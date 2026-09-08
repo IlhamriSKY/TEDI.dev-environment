@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.1.11
+
+- **A terminal in any project, from its row.** TEDI's own terminal, opened in
+  that project's folder, so `php`, `node`, `npm` and `composer` in it are the
+  versions that project asks for - which only works in the app's shell, because
+  the shims this extension puts on the terminal PATH are what does the
+  resolving. Needs TEDI 0.4.47, which added `ctx.tabs.openTerminal`; on an older
+  host the button is simply not there rather than the extension refusing to
+  install.
+
+- **New project makes the folder.** It was a folder picker, and a picker is the
+  wrong dialog for what people actually do: they are not finding an existing
+  project, they are starting one. Type a name, get `www/<name>` with its virtual
+  host, certificate and hosts entry, live before an editor is open. **Refresh**
+  replaces **Scan** beside it and looks only in `www` - the picker asked WHERE
+  every time and the answer was always the same folder.
+
+- **Every folder in `www` is a project, marker file or not.** The scan looked
+  for a `composer.json`, a `package.json`, an `artisan`, which was right while
+  it scanned any folder you pointed it at and wrong once it only ever scans this
+  environment's own `www`. A folder in there is a project because of where it
+  is. The case that made it obvious: the empty one you just created and are
+  about to clone into, which the scan reported as "nothing new" thirty seconds
+  after you made it. `node_modules`, `vendor` and dotfolders are still skipped.
+
+- **Start, Stop, Restart, Enable and Disable are coloured and carry an icon**, in
+  the pane's own status triad rather than a second vocabulary: green goes, red
+  stops, amber is the state in between. So Start reads as Start before the word
+  does, and Stop and Disable are the two you cannot press by accident while
+  looking somewhere else.
+
+- **A button says it is working.** Every handler in this pane is async and most
+  reach the network or the disk, and the button already knows exactly when that
+  starts and ends - so its icon spins for as long as it runs. "Install Xdebug"
+  downloads a DLL and rewrites php.ini, and looked frozen for every second of
+  it.
+
+- **Settings is a dialog off the header**, not a section at the bottom. A pane
+  you scroll past the runtimes, the services and every project to reach is a
+  pane whose last screenful is furniture, and these two are changed about twice
+  a year.
+
 ## 0.1.10
 
 - **Every setting is in the pane; the Settings card is gone.** It held seven

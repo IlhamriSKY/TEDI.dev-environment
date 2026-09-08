@@ -8,19 +8,42 @@
 // cannot show you whether the port is currently bound.
 //
 // What is left is the two that describe every project rather than any one
-// component, so they get a section of their own at the bottom.
+// component. They are a DIALOG off the header rather than a section at the
+// bottom: a pane you scroll past the runtimes, the services and every project
+// to reach is a pane whose last screenful is furniture, and these are changed
+// about twice a year.
 
-import { h, row, muted, section, checkbox, input } from "./el.js";
+import { h, row, muted, modal, button, checkbox, input } from "./el.js";
 import { writeSetting } from "../manager/config.js";
 import { publish } from "../web/publish.js";
+import { paths } from "../core/paths.js";
 import { config, ctx } from "../runtime.js";
 
 /**
+ * Open the settings dialog.
+ *
+ * Every field commits on its own, the way the rows in the pane do - there is no
+ * Save, because there is nothing to cancel back to. The button just closes it.
+ *
  * @param {() => void} refresh
- * @returns {HTMLElement}
+ * @returns {void}
  */
-export function settingsView(refresh) {
-  return section("Settings", [suffixRow(refresh), hostsRow(refresh)]);
+export function openSettings(refresh) {
+  // Each field republishes, so re-rendering the dialog in place would rebuild
+  // the input the user is still standing in. It closes instead: one change is
+  // what this dialog is opened for.
+  const dialog = modal({
+    title: "Settings",
+    description: `This environment lives in ${paths.root()}.`,
+    body: h("div", { style: "display:flex;flex-direction:column;gap:2px" }, [
+      suffixRow(refresh),
+      hostsRow(refresh),
+    ]),
+    footer: h("div", { style: "display:flex;justify-content:flex-end" }, [
+      button("Done", () => dialog.close(), { variant: "primary" }),
+    ]),
+    width: "min(30rem,100%)",
+  });
 }
 
 /**

@@ -73,9 +73,23 @@ export function h(tag, props = {}, children = []) {
   return node;
 }
 
-/** One turn of the spinning button icon, in ms. Shared with the caller that
- *  decides how long to keep one on screen. */
+/** One turn of a spinning icon, in ms. Exported because a caller that decides
+ *  how long to keep one on screen has to agree with it. */
 export const SPIN_MS = 900;
+
+/**
+ * The rotation, anchored to the clock rather than to when the node was built.
+ *
+ * This pane repaints on a four-second poll and every repaint builds new nodes,
+ * so without the negative delay a spinner restarted from zero each time and
+ * what you saw was a twitch. Two spinners on screen also turn together, which
+ * is what makes them read as one thing happening rather than several.
+ *
+ * @returns {string}
+ */
+function spinAnimation() {
+  return `tedi-dev-spin ${SPIN_MS}ms linear infinite -${Date.now() % SPIN_MS}ms`;
+}
 
 /**
  * A button, in the app's own shape.
@@ -84,10 +98,15 @@ export const SPIN_MS = 900;
  * take seconds, and without this a second click starts a second download of the
  * same thing into the same file.
  *
+ * The colour vocabulary is the pane's own status triad, not a second one:
+ * green goes, red stops, amber is the state in between. So Start reads as Start
+ * before the word is, and Stop and Disable are the two you cannot press by
+ * accident while looking somewhere else.
+ *
  * @param {string} label
  * @param {() => unknown | Promise<unknown>} onClick
- * @param {{ variant?: "primary" | "default" | "danger" | "ghost", title?: string,
- *           disabled?: boolean, icon?: string, spin?: boolean }} [opts]
+ * @param {{ variant?: "primary" | "default" | "danger" | "success" | "warn" | "ghost",
+ *           title?: string, disabled?: boolean, icon?: string, spin?: boolean }} [opts]
  * @returns {HTMLButtonElement}
  */
 export function button(label, onClick, opts = {}) {
@@ -112,6 +131,12 @@ export function button(label, onClick, opts = {}) {
       "color:var(--tedi-button-face-foreground, var(--secondary-foreground))",
     danger:
       "background:color-mix(in oklab,var(--destructive) 12%,transparent);color:var(--destructive)",
+    success:
+      "background:color-mix(in oklab,var(--tedi-icon-idle, #34d399) 14%,transparent);" +
+      "color:var(--tedi-icon-idle, #34d399)",
+    warn:
+      "background:color-mix(in oklab,var(--tedi-icon-working, #facc15) 14%,transparent);" +
+      "color:var(--tedi-icon-working, #facc15)",
     ghost: "background:transparent;color:var(--muted-foreground)",
   }[variant];
 
@@ -122,14 +147,7 @@ export function button(label, onClick, opts = {}) {
   // button you pressed is where you are already looking, and it says which
   // component is busy without a second element having to name one.
   const glyph = opts.icon ? icon(opts.icon, "currentColor", iconOnly ? 14 : 13) : null;
-  if (glyph && opts.spin) {
-    glyph.style.animation = `tedi-dev-spin ${SPIN_MS}ms linear infinite`;
-    // Anchored to the clock, not to when this node was built. The panel
-    // repaints on a four-second poll and each repaint is a NEW button, so
-    // without the negative delay the glyph snapped back to zero every time and
-    // what you saw was a twitch rather than a rotation.
-    glyph.style.animationDelay = `-${Date.now() % SPIN_MS}ms`;
-  }
+  if (glyph && opts.spin) glyph.style.animation = spinAnimation();
 
   const btn = /** @type {HTMLButtonElement} */ (
     h("button", { style: `${base};${skin}`, title: opts.title }, [
@@ -158,11 +176,19 @@ export function button(label, onClick, opts = {}) {
     btn.disabled = true;
     btn.style.opacity = "0.6";
     btn.style.cursor = "progress";
+    // Whatever this button does, it says so while it is doing it. Every handler
+    // in this pane is async and most reach the network or the disk, and the
+    // button already knows exactly when that starts and ends - so the icon
+    // spins here rather than at each call site remembering to ask for it.
+    // "Install Xdebug" downloads a DLL and reconfigures php.ini, and looked
+    // frozen for every second of it.
+    if (glyph) glyph.style.animation = spinAnimation();
     try {
       await onClick();
     } finally {
       // The panel usually re-renders and throws this node away; restoring is
       // for the case where it does not.
+      if (glyph) glyph.style.animation = opts.spin ? spinAnimation() : "";
       if (btn.isConnected) {
         btn.disabled = false;
         btn.style.opacity = "1";
@@ -535,13 +561,12 @@ export function checkbox(checked, opts = {}) {
 export function status(tone, size = 13) {
   const spec = STATUS_TONES[tone] ?? STATUS_TONES.idle;
   const node = icon(spec.icon, spec.colour, size);
-  // The app's own breathing pulse, by name. `ai-breathe` is defined at the top
-  // level of `styles/globals.css` precisely so it is always available, and this
-  // pane renders in the same document - so the animation an active AI CLI icon
-  // uses is the animation this uses, rather than a second one that drifts from
-  // it. If the host ever drops the keyframe the icon simply stops breathing,
-  // which is the right way for a decoration to fail.
-  if (spec.breathe) node.style.animation = "ai-breathe 1.8s ease-in-out infinite";
+  // A LoaderCircle is a ring with a gap in it: the gap only means anything if it
+  // travels. It used to breathe instead - the app's own `ai-breathe` pulse - and
+  // a spinner that fades in and out is a blinking ring, which reads as a fault
+  // light rather than as work in progress. Rotation is what that glyph is drawn
+  // for, and it is the one animation nobody has to learn.
+  if (spec.spin) node.style.animation = spinAnimation();
   return node;
 }
 
@@ -559,23 +584,23 @@ export function status(tone, size = 13) {
  * running service is.
  */
 const STATUS_TONES = {
-  ok: { icon: "lucide:CircleCheck", colour: "var(--tedi-icon-idle, #34d399)", breathe: false },
+  ok: { icon: "lucide:CircleCheck", colour: "var(--tedi-icon-idle, #34d399)", spin: false },
   working: {
     icon: "lucide:LoaderCircle",
     colour: "var(--tedi-icon-working, #facc15)",
-    breathe: true,
+    spin: true,
   },
   warn: {
     icon: "lucide:TriangleAlert",
     colour: "var(--tedi-icon-working, #facc15)",
-    breathe: false,
+    spin: false,
   },
   error: {
     icon: "lucide:CircleAlert",
     colour: "var(--tedi-icon-blocked, var(--destructive))",
-    breathe: false,
+    spin: false,
   },
-  idle: { icon: "lucide:Circle", colour: "var(--muted-foreground)", breathe: false },
+  idle: { icon: "lucide:Circle", colour: "var(--muted-foreground)", spin: false },
 };
 
 /**

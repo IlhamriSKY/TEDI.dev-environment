@@ -288,12 +288,35 @@ export type SafeSshConnection = {
  * whether your axis starts at zero, auto-fits a window, or tracks a budget.
  *
  * At most the newest 48 columns are drawn: that is the widest grid the
- * tooltip's popover holds without wrapping.
+ * tooltip's popover holds without wrapping. A `cells` grid gets 53, a full year
+ * of weeks, which the wider popover affords.
  */
 export type StatusItemDetailChart = {
   /** Oldest first, newest last. Each 0..1; 0 draws an empty column, so a gap in
    *  the data and a value at the floor stay distinguishable. */
   values: number[];
+  /** How `values` are laid out.
+   *
+   *  `"columns"` (the default) is a trend: one column per value, filled from
+   *  the bottom, so the shape reads as a line.
+   *
+   *  `"cells"` is a calendar: one CELL per value, filling each column top to
+   *  bottom before moving right, its shade set by the value. That is the GitHub
+   *  contribution grid - `rows: 7` and a value per day draws a year of
+   *  activity. Send a multiple of `rows` values, oldest cell first, or the
+   *  columns come out misaligned. */
+  mode?: "columns" | "cells";
+  /** Cells mode: one label per COLUMN, in a caption row above the grid. Null
+   *  or empty leaves a column unlabelled, which is how a month name sits over
+   *  the week it starts in instead of repeating 53 times. Labels are placed on
+   *  the column pitch and may overhang to the right, so leave a few columns
+   *  between them. */
+  columnLabels?: (string | null)[];
+  /** Cells mode: one label per VALUE, e.g. `"Mon, 8 Sep - 14 prompts"`. Shown
+   *  in place of `note` while the pointer is over that cell. A grid of 371
+   *  squares has no room for a date axis; this is how it answers "which day is
+   *  that?" anyway. */
+  cellLabels?: (string | null)[];
   /** Fill colour, same palette as `StatusItem.tone`. */
   tone?: "default" | "success" | "warning" | "error";
   /** Grid height in cells. Clamped to 3..16, default 8. */
@@ -655,9 +678,8 @@ export type ContributedPanel = {
   title: string;
   /** `"right"` is the slide-out slot next to the workspace (mutually
    *  exclusive with the AI sidebar). `"tab"` mounts the renderer as a full
-   *  workspace tab, opened via `ctx.tabs.openExtensionTab`. The other
-   *  surfaces are reserved. */
-  surface: "sidebar-bottom" | "statusbar-right" | "right" | "tab";
+   *  workspace tab, opened via `ctx.tabs.openExtensionTab`. */
+  surface: "right" | "tab";
   icon?: string;
   /** Open this panel once per session on launch. The user can override. */
   defaultOpen?: boolean;
@@ -1025,7 +1047,8 @@ export type ExtensionContext = {
     setActiveContent(content: string): boolean;
   };
 
-  /** Extension-owned tabs and split-pane leaves. All three need `tabs:open`. */
+  /** Extension-owned tabs and split-pane leaves, plus the app's own terminal.
+   *  All of them need `tabs:open`. */
   tabs: {
     /** Open or focus a standalone workspace tab that mounts the renderer
      *  registered for `panelId`. Returns the tab id, or `null`. */
@@ -1033,6 +1056,20 @@ export type ExtensionContext = {
     /** Same, but as a native split-pane leaf - the same frame as a terminal
      *  or editor, splittable and joinable. */
     openExtensionPane(opts: OpenExtensionTabOptions): number | null;
+    /**
+     * Open a REAL terminal tab, working directory `cwd`.
+     *
+     * The app's own terminal, not a surface of your own: the same shell, the
+     * same PATH (including anything an extension registered on it), the same
+     * AI-CLI detection and the same tab controls. If you know where something
+     * lives - a project folder, a checkout, a mount - put the user in it
+     * instead of printing the path and hoping.
+     *
+     * Returns the new tab's id, or `null` if the app has not wired the bridge
+     * yet (very early activation). Feature-detect with
+     * `typeof ctx.tabs.openTerminal === "function"` on older hosts.
+     */
+    openTerminal(opts?: { cwd?: string }): number | null;
     /** Tint the title to reflect a lifecycle state and/or relabel it.
      *  Matches on `(extensionId, panelId, reuseKey)` and patches BOTH a
      *  standalone tab and a live pane leaf. Pass `state: null` to clear. */

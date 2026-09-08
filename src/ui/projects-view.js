@@ -6,19 +6,33 @@
 // their project is not on the version they set globally, which is otherwise the
 // most confusing thing a version manager does.
 
-import { h, row, pill, muted, button, dropdown, section, status, icon, confirm } from "./el.js";
+import {
+  h,
+  row,
+  pill,
+  muted,
+  button,
+  dropdown,
+  section,
+  status,
+  icon,
+  confirm,
+  modal,
+  textInput,
+} from "./el.js";
 import {
   domainOf,
   addProject,
   updateProject,
   removeProject,
   discoverProjects,
+  slug,
 } from "../project/projects.js";
 import { resolveProject } from "../project/resolve.js";
 import { installedOf } from "../manager/versions.js";
-import { paths } from "../core/paths.js";
+import { paths, join } from "../core/paths.js";
 import { openFolder } from "../core/proc.js";
-import { mkdirp } from "../core/fsx.js";
+import { mkdirp, exists } from "../core/fsx.js";
 import { publish } from "../web/publish.js";
 import { state, config, ctx } from "../runtime.js";
 
@@ -47,13 +61,14 @@ export async function projectsView(refresh) {
       },
       { icon: "lucide:FolderOpen", title: paths.www() },
     ),
-    button("Scan", () => void scanFolder(refresh), {
-      icon: "lucide:Radar",
-      title: "Register every project-looking folder under a directory",
+    button("Refresh", () => void refreshProjects(refresh), {
+      icon: "lucide:RefreshCw",
+      title: `Pick up anything new in ${paths.www()}`,
     }),
-    button("Add project", () => void addByPath(refresh), {
+    button("New project", () => void newProject(refresh), {
       variant: "primary",
       icon: "lucide:Plus",
+      title: `Create a folder in ${paths.www()} and serve it`,
     }),
   ]);
 
@@ -71,7 +86,7 @@ export async function projectsView(refresh) {
             text: "No projects yet.",
             style: "font-size:11.5px;color:var(--muted-foreground)",
           }),
-          muted(`Drop a folder in ${paths.www()} and press Scan, or add one from anywhere.`),
+          muted(`Press New project, or drop a folder in ${paths.www()} and press Refresh.`),
         ],
       ),
     );
@@ -132,16 +147,31 @@ async function projectRow(project, refresh) {
   );
 
   const right = h("div", { style: "display:flex;align-items:center;gap:5px;flex:none" }, [
-    button("Open", () => openFolder(project.path), {
+    button("Folder", () => openFolder(project.path), {
       icon: "lucide:FolderOpen",
-      title: project.path,
+      title: `Open ${project.path} in the file manager`,
     }),
-    button(enabled ? "Disable" : "Enable", async () => {
-      await updateProject(project.id, { enabled: !enabled });
-      // A disabled project has to stop being SERVED, not just look grey.
-      await publish().catch(() => {});
-      refresh();
-    }),
+    // Feature-detected, not declared with `engines.tedi`: an older host simply
+    // does not show the button, rather than refusing to install the extension
+    // over one row control. `ctx.tabs.openTerminal` landed in TEDI 0.4.46.
+    typeof ctx?.tabs?.openTerminal === "function"
+      ? button("Terminal", () => void openProjectTerminal(project), {
+          icon: "lucide:SquareTerminal",
+          title: `Open a terminal in ${project.path}`,
+        })
+      : null,
+    button(
+      enabled ? "Disable" : "Enable",
+      async () => {
+        await updateProject(project.id, { enabled: !enabled });
+        // A disabled project has to stop being SERVED, not just look grey.
+        await publish().catch(() => {});
+        refresh();
+      },
+      enabled
+        ? { variant: "danger", icon: "lucide:PowerOff" }
+        : { variant: "success", icon: "lucide:Power" },
+    ),
     button(
       "Remove",
       async () => {
@@ -244,22 +274,52 @@ async function serve(names, refresh) {
 }
 
 /**
- * Register a folder the user picks.
+ * A terminal in the project's own folder.
  *
- * A native folder picker rather than a typed path: `ctx.ui.pickFolder` opens
- * the same OS dialog the folder-tree bridge already uses, and a typed absolute
- * path is how a stray character ends up in one.
+ * TEDI's own terminal, not one of ours: the shims this extension puts on the
+ * terminal PATH are what make `php` and `node` in there resolve to the version
+ * THIS project asks for, and that only happens in the app's shell. A terminal
+ * of our own would have been a second shell with none of that.
+ *
+ * @param {Project} project @returns {Promise<void>}
+ */
+async function openProjectTerminal(project) {
+  // The folder can have been deleted since the row was drawn, and a shell that
+  // starts in a directory that is not there lands somewhere else without saying
+  // so - which reads as the button opening the wrong terminal.
+  if (!(await exists(project.path))) {
+    ctx?.ui.toast(`${project.path} is not there any more.`, { variant: "error" });
+    return;
+  }
+  ctx?.tabs?.openTerminal?.({ cwd: project.path });
+}
+
+/**
+ * Make the folder, then serve it.
+ *
+ * This used to be a folder picker, and a picker is the wrong dialog for the
+ * thing people actually do: they are not finding an existing project, they are
+ * starting one. So the answer is a name, `www/<name>` is created, and the site
+ * is live before they have opened an editor. The folder picker is still one
+ * click away as "Open www" beside it, for a project that lives somewhere else -
+ * drop it in and press Refresh.
  *
  * @param {() => void} refresh @returns {Promise<void>}
  */
-async function addByPath(refresh) {
-  const picked = await ctx?.ui.pickFolder({
-    title: "Add a project folder",
-    defaultPath: paths.www(),
-  });
-  if (!picked) return;
+async function newProject(refresh) {
+  const name = await askProjectName();
+  if (!name) return;
+  const dir = join(paths.www(), name);
   try {
-    const project = await addProject(picked);
+    if (await exists(dir)) {
+      // Registering it anyway would be the friendly-looking answer and the
+      // wrong one: "New project" that quietly adopts whatever was already at
+      // that path is how you end up serving a folder you forgot about.
+      ctx?.ui.toast(`${dir} already exists. Press Refresh to serve it.`, { variant: "warning" });
+      return;
+    }
+    await mkdirp(dir);
+    const project = await addProject(dir);
     await serve([project.name], refresh);
   } catch (err) {
     ctx?.ui.toast(err instanceof Error ? err.message : String(err), { variant: "error" });
@@ -267,24 +327,68 @@ async function addByPath(refresh) {
 }
 
 /**
- * Register every project-looking folder under a parent directory.
+ * Ask for the name, as a folder name and a domain label at once.
  *
- * Defaults to the environment's own `www`: put a folder there and it becomes a
- * site. Any other folder still works.
+ * `slug` is what the domain uses, so the field shows what the domain WILL be
+ * rather than letting someone type "My App" and then find a site at
+ * `my-app.test` they did not name. The folder gets the same slug, so the two
+ * never diverge.
+ *
+ * @returns {Promise<string | null>}
+ */
+function askProjectName() {
+  return new Promise((resolve) => {
+    /** @type {string | null} */
+    let answer = null;
+    const field = textInput("my-app");
+    const preview = muted("");
+    const sync = () => {
+      const name = slug(field.value.trim());
+      preview.textContent = field.value.trim()
+        ? `Creates ${join(paths.www(), name)}, served at ${name}.${config.domainSuffix}`
+        : "";
+    };
+    field.addEventListener("input", sync);
+
+    const commit = () => {
+      if (!field.value.trim()) return;
+      answer = slug(field.value.trim());
+      dialog.close();
+    };
+    field.addEventListener("keydown", (ev) => {
+      if (/** @type {KeyboardEvent} */ (ev).key === "Enter") commit();
+    });
+
+    const dialog = modal({
+      title: "New project",
+      description: `A folder in ${paths.www()}, with its virtual host and certificate written for it.`,
+      body: h("div", { style: "display:flex;flex-direction:column;gap:6px" }, [field, preview]),
+      footer: h("div", { style: "display:flex;gap:8px;justify-content:flex-end" }, [
+        button("Cancel", () => dialog.close()),
+        button("Create", commit, { variant: "primary", icon: "lucide:Plus" }),
+      ]),
+      onClose: () => resolve(answer),
+    });
+    field.focus();
+  });
+}
+
+/**
+ * Pick up anything new in `www`.
+ *
+ * The environment's own folder and no other: dropping a project in there is the
+ * documented way to add one you already have, and a picker asking WHERE to look
+ * every time was a question with the same answer on every press.
  *
  * @param {() => void} refresh @returns {Promise<void>}
  */
-async function scanFolder(refresh) {
+async function refreshProjects(refresh) {
   await mkdirp(paths.www());
-  const target = await ctx?.ui.pickFolder({
-    title: "Scan a folder for projects",
-    defaultPath: paths.www(),
-  });
-  if (!target) return;
   try {
-    const found = await discoverProjects(target);
+    const found = await discoverProjects(paths.www());
     if (found.length === 0) {
-      ctx?.ui.toast(`No unregistered projects found in ${target}.`, { variant: "info" });
+      refresh();
+      ctx?.ui.toast(`Nothing new in ${paths.www()}.`, { variant: "info" });
       return;
     }
     /** @type {string[]} */

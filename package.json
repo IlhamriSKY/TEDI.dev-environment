@@ -1,6 +1,6 @@
 {
   "name": "tedi-devenv",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "private": true,
   "type": "module",
   "description": "Build tooling for the TEDI Dev Environment extension. The shipped artifact is the bundled extension.js (built in CI into the release .zip, not committed); source lives in src/.",

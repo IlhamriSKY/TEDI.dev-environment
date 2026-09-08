@@ -33,7 +33,7 @@ import { setCtx, setConfig, state } from "./runtime.js";
 import { provider } from "./registry/index.js";
 import { install, uninstall, installRoot, verify } from "./manager/install.js";
 import { scanInstalled, installedOf } from "./manager/versions.js";
-import { addProject } from "./project/projects.js";
+import { addProject, discoverProjects } from "./project/projects.js";
 import { migrateLayout } from "./manager/migrate.js";
 import { iniPathFor } from "./manager/phpini.js";
 import { saveJob, runJob } from "./manager/cron.js";
@@ -545,6 +545,38 @@ await step("a scheduled job runs the runtime the shim resolves", async () => {
   // keeping a log the user has to go and find.
   if (job.lastExit !== 0 || !job.lastRun) throw new Error("the run was not recorded on the job");
   console.log(`        node --version through the shim -> ${res.out.trim()}`);
+});
+
+await step("a bare folder in www is a project, marker file or not", async () => {
+  // This scanned for `composer.json`, `package.json`, `artisan` and friends,
+  // which was right while it scanned any folder the user pointed it at and
+  // wrong once it only ever scans the environment's own `www`: a folder in
+  // there is a project because of where it is. The case that made it obvious is
+  // the empty one you just made and are about to clone into - the scan said
+  // "nothing new" about a folder the user had put there thirty seconds ago.
+  const www = path.join(root, "www");
+  const bare = path.join(www, "bare-checkout");
+  const junk = path.join(www, "node_modules");
+  mkdirSync(bare, { recursive: true });
+  mkdirSync(junk, { recursive: true });
+  mkdirSync(path.join(www, ".git"), { recursive: true });
+
+  const found = await discoverProjects(www);
+  const names = found.map((f) => f.name);
+  if (!names.includes("bare-checkout")) {
+    throw new Error(`an empty folder in www was not offered: saw ${names.join(", ") || "nothing"}`);
+  }
+  if (names.includes("node_modules")) throw new Error("a dependency tree was offered as a project");
+  if (names.includes(".git")) throw new Error("a dotfolder was offered as a project");
+
+  // And registering it takes it out of the answer, or every Refresh would add
+  // the same project again.
+  await addProject(bare);
+  const again = await discoverProjects(www);
+  if (again.some((f) => f.name === "bare-checkout")) {
+    throw new Error("an already-registered folder was offered a second time");
+  }
+  console.log(`        offered ${names.join(", ")}, and not again once registered`);
 });
 
 await step("uninstall removes the tree", async () => {

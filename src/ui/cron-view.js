@@ -217,10 +217,16 @@ function jobRow(job, refresh) {
       icon: "lucide:Play",
       title: "Run this job immediately, whatever its schedule says",
     }),
-    button(enabled ? "Disable" : "Enable", async () => {
-      await saveJob({ ...job, enabled: !enabled });
-      refresh();
-    }),
+    button(
+      enabled ? "Disable" : "Enable",
+      async () => {
+        await saveJob({ ...job, enabled: !enabled });
+        refresh();
+      },
+      enabled
+        ? { variant: "danger", icon: "lucide:PowerOff" }
+        : { variant: "success", icon: "lucide:Power" },
+    ),
     button("Edit", () => openEditor(job, refresh), { icon: "lucide:PenLine" }),
     button(
       "Remove",

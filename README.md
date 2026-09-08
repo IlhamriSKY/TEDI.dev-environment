@@ -23,6 +23,15 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
 - **Virtual hosts with HTTPS.** Every project gets `name.test` (or whatever
   suffix you choose), a generated vhost, a certificate from a local CA, and a
   hosts entry written for you.
+- **New project makes the folder.** Type a name and you get `www/<name>`, its
+  virtual host, its certificate and its hosts entry, live before you have opened
+  an editor. Already have the folder? Drop it in `www` and press **Refresh** -
+  every folder in there is a site, empty ones included, because an empty
+  checkout is exactly when having the domain already issued is worth something.
+- **A terminal in any project, from its row.** TEDI's own terminal, opened in
+  that folder, so `php`, `node`, `npm` and `composer` in it are that project's
+  versions. Needs TEDI 0.4.47 or newer; on an older one the button is simply
+  not there.
 - **Nginx and Apache, one at a time.** Both get installed, **Use this** picks
   which one your project URLs point at, and starting either stops the other — so
   there is only ever one server on the ports you configured and one set of rules
@@ -53,9 +62,9 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
 - **Everything is set in the pane.** There is no card in TEDI's Settings to go
   and find: the root folder is the first setup step, the web server is **Use
   this** on its own row, the ports are the fields beside it, and the domain
-  suffix and the hosts-file switch are a short **Settings** section at the
-  bottom. Each decision sits next to the thing it changes, which is also the
-  only place that can tell you whether the port is currently bound.
+  suffix and the hosts-file switch are behind **Settings** in the top right.
+  Each decision sits next to the thing it changes, which is also the only place
+  that can tell you whether the port is currently bound.
 
 ## Setting it up
 

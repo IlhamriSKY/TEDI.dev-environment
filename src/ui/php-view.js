@@ -13,19 +13,7 @@
 // things a user actually watches - what is running, and which projects exist -
 // off the bottom of a short pane.
 
-import {
-  h,
-  row,
-  muted,
-  pill,
-  button,
-  dropdown,
-  input,
-  icon,
-  mark,
-  modal,
-  skeleton,
-} from "./el.js";
+import { h, row, muted, pill, button, dropdown, input, icon, mark, modal, skeleton } from "./el.js";
 import { markFor } from "./marks.js";
 import { installedOf } from "../manager/versions.js";
 import { activeVersion } from "../manager/config.js";
@@ -142,7 +130,10 @@ function loadingBlocks() {
         Array.from({ length: 8 }, () => bar("100%", 30)),
       ),
     ]),
-    h("div", { style: "display:flex;flex-direction:column;gap:7px" }, [bar("70px", 9), bar("100%", 34)]),
+    h("div", { style: "display:flex;flex-direction:column;gap:7px" }, [
+      bar("70px", 9),
+      bar("100%", 34),
+    ]),
     h("div", { style: "display:flex;flex-direction:column;gap:7px" }, [
       bar("78px", 9),
       h(
@@ -417,10 +408,16 @@ async function xdebugBlock(version, refresh) {
       pill(`port ${st.port}`),
       muted(MODES.find((m) => m.value === (st.mode ?? "off"))?.hint ?? ""),
       h("div", { style: "flex:1" }),
-      button(st.enabled ? "Disable" : "Enable", async () => {
-        await setEnabled(version, !st.enabled);
-        refresh();
-      }),
+      button(
+        st.enabled ? "Disable" : "Enable",
+        async () => {
+          await setEnabled(version, !st.enabled);
+          refresh();
+        },
+        st.enabled
+          ? { variant: "danger", icon: "lucide:PowerOff" }
+          : { variant: "success", icon: "lucide:Power" },
+      ),
     ]),
   ]);
 }
