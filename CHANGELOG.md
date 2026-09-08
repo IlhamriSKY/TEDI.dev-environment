@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.4
+
+- **The download bar is a hairline, not a second row.** It was 12px, which is
+  what `components/ui/progress.tsx` is and is right for a progress bar somebody
+  is looking AT. This one runs under a compact row somebody is looking THROUGH,
+  and at that height it read as another row appearing in the list. Three pixels
+  is enough to see from across the pane and little enough that nothing jumps
+  when a download starts.
+
 ## 0.1.3
 
 - **The install picker can be searched, and says what each version is.** It

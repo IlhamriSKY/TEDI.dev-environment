@@ -34,6 +34,10 @@ import { ctx } from "../runtime.js";
  *  One large value reads as a pill at every control height used here. */
 const PILL = "999px";
 
+/** How thick the progress hairline under a working row is. See `progress()`
+ *  for why this does not follow the app's own 12px progress bar. */
+const BAR_HEIGHT = "3px";
+
 /**
  * There is deliberately no `html` option. Almost every string this UI renders
  * came from somewhere else - a folder name, a version index, an error from a
@@ -558,12 +562,20 @@ const STATUS_TONES = {
 };
 
 /**
- * A progress bar, in the shape `components/ui/progress.tsx` renders.
+ * A hairline under the row that is doing the work.
  *
- * That component is a `bg-muted` track with a `bg-primary/90` indicator moved
- * by `translateX(-(100 - value)%)` rather than resized, which is what makes the
- * `transition-all` animate smoothly instead of reflowing. Ported rather than
- * reinvented so a download here looks like every other progress in the app.
+ * The mechanics are `components/ui/progress.tsx`: a `bg-muted` track with a
+ * `bg-primary/90` indicator moved by `translateX(-(100 - value)%)` rather than
+ * resized, which is what makes the transition animate smoothly instead of
+ * reflowing. Ported rather than reinvented so a download here behaves like
+ * every other progress in the app.
+ *
+ * The HEIGHT deliberately does not follow it. That component is `h-3`, 12px,
+ * which is right for a progress bar somebody is looking AT; this one runs under
+ * a compact row somebody is looking THROUGH, and at 12px it read as a second
+ * row rather than as an attribute of the first. Three pixels is enough to see
+ * from across the pane and little enough that the list does not jump when a
+ * download starts.
  *
  * An UNKNOWN length is drawn as a sweep, never as 0%. "Unpacking" and
  * "Verifying" have no measurable length, and a bar sitting at zero through them
@@ -595,7 +607,7 @@ export function progress(pct) {
         ...(known ? { "aria-valuenow": String(value) } : {}),
       },
       style:
-        "display:flex;align-items:center;height:12px;width:100%;min-width:0;" +
+        `display:flex;align-items:center;height:${BAR_HEIGHT};width:100%;min-width:0;` +
         "overflow-x:hidden;background:var(--muted)",
     },
     [indicator],
