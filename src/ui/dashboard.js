@@ -16,6 +16,7 @@ import { h, button, muted, section, row, pill, icon, status, progress } from "./
 import { runtimesView } from "./runtimes-view.js";
 import { servicesView } from "./services-view.js";
 import { projectsView } from "./projects-view.js";
+import { settingsView } from "./settings-view.js";
 import { state, config, ctx } from "../runtime.js";
 import { paths, layoutDirs } from "../core/paths.js";
 import { ensureDirs, isDir } from "../core/fsx.js";
@@ -115,7 +116,7 @@ async function paint(root, refresh, current) {
   // appended when it resolves rather than holding the whole panel blank.
   const projects = await projectsView(refresh);
   if (!current()) return;
-  root.append(projects);
+  root.append(projects, settingsView(refresh));
 }
 
 /**
@@ -381,34 +382,36 @@ async function setupSteps(refresh) {
       // prompt must not lock the panel forever - so a missing CA is an action
       // on this row rather than a step of its own or a reason to stay blocked.
       done: chosen && missing.length === 0,
-      detail: gated && busy
-        ? busy
-        : !chosen
-          ? "Choose the root folder first - this is where everything gets installed."
-          : missing.length !== 0
-            ? `Downloads the current stable ${names}, plus every server and database this platform has a build for, and trusts the local certificate authority so https works.`
-            : https.trusted
-              ? `${names} installed, and the local certificate authority is trusted.`
-              : // `reason` is a finished sentence, so it is used as one rather
-                // than spliced into a clause - that produced "not been trusted
-                // yet., so https will warn".
-                `${names} installed. ${(https.reason ?? "The local certificate authority is not trusted.").replace(/\.?$/, ".")} Sites will load over https with a browser warning until it is.`,
+      detail:
+        gated && busy
+          ? busy
+          : !chosen
+            ? "Choose the root folder first - this is where everything gets installed."
+            : missing.length !== 0
+              ? `Downloads the current stable ${names}, plus every server and database this platform has a build for, and trusts the local certificate authority so https works.`
+              : https.trusted
+                ? `${names} installed, and the local certificate authority is trusted.`
+                : // `reason` is a finished sentence, so it is used as one rather
+                  // than spliced into a clause - that produced "not been trusted
+                  // yet., so https will warn".
+                  `${names} installed. ${(https.reason ?? "The local certificate authority is not trusted.").replace(/\.?$/, ".")} Sites will load over https with a browser warning until it is.`,
       // Only while this checklist is the whole panel. See `gated`.
       bar: gated && busyState ? progress(busyState.pct) : undefined,
-      aside: gated && busy
-        ? undefined
-        : chosen && missing.length > 0
-          ? button("Install", () => void installEverything(refresh), {
-              variant: "primary",
-              icon: "lucide:Download",
-            })
-          : chosen && !https.trusted && https.possible
-            ? button("Trust certificate", () => void installEverything(refresh), {
+      aside:
+        gated && busy
+          ? undefined
+          : chosen && missing.length > 0
+            ? button("Install", () => void installEverything(refresh), {
                 variant: "primary",
-                icon: "lucide:ShieldCheck",
-                title: "Installs the local certificate authority into this machine's trust store",
+                icon: "lucide:Download",
               })
-            : undefined,
+            : chosen && !https.trusted && https.possible
+              ? button("Trust certificate", () => void installEverything(refresh), {
+                  variant: "primary",
+                  icon: "lucide:ShieldCheck",
+                  title: "Installs the local certificate authority into this machine's trust store",
+                })
+              : undefined,
     },
 
     {
@@ -476,7 +479,7 @@ async function setupSteps(refresh) {
       note: true,
       detail:
         `Ports ${config.httpPort} and ${config.httpsPort} are below 1024, which only root may bind on this platform. ` +
-        "Either run TEDI with elevated rights, or set the HTTP and HTTPS ports above 1024 in Settings.",
+        "Either run TEDI with elevated rights, or set the ports above 1024 on the web server row.",
     });
   }
 

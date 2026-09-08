@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.10
+
+- **Every setting is in the pane; the Settings card is gone.** It held seven
+  fields, four of which the pane already decided beside the thing they change -
+  the root folder is the first setup step, the web server is **Use this** on its
+  own row, the two ports and the HTTPS tick are the fields next to it. That made
+  it a second place to look for one decision, and the one that cannot tell you
+  whether the port is currently bound. The remaining two, the domain suffix and
+  whether the hosts file is written, are a short **Settings** section at the
+  bottom of the pane. Every key and default is unchanged, so an environment
+  configured through the old card keeps its values.
+
+- **The Install spinner is a spinner.** It blinked, for two reasons that both
+  had to go: the panel repaints on a four-second poll and each repaint built a
+  new icon, so the rotation restarted from zero every time, and a version list
+  that is already cached answers in a few tens of milliseconds, so on the second
+  press the whole thing appeared and vanished inside a frame. The animation is
+  anchored to the clock rather than to when the node was built, and the picker
+  holds it for one full turn.
+
 ## 0.1.9
 
 - **The databases turn up in SQL Explorer by themselves.** Install MySQL or

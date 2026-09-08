@@ -1,22 +1,31 @@
 // Global configuration.
 //
 // There are two sources and they answer different questions. The extension's
-// SETTINGS CARD owns the handful of values a user edits in Settings (data
+// SETTINGS owns the handful of values a user edits in the pane (data
 // directory, domain suffix, web server, ports); `config.json` in the data root
 // owns everything the extension decides for itself, chiefly which version of
 // each component is currently active.
 //
 // They are merged into one live `config` object at activation, and the settings
-// card always wins for the keys it owns. Keeping the active-version map out of
-// the settings card is deliberate: it changes whenever a user switches a
-// runtime, and a settings store that is rewritten on every switch would fight
-// the Settings window, which is a separate webview reading the same file.
+// store always wins for the keys it owns. Keeping the active-version map out of
+// it is deliberate: it changes whenever a user switches a runtime, and a
+// settings store rewritten on every switch would fight the Settings window,
+// which is a separate webview reading the same file.
+//
+// None of these appear in TEDI's Settings any more. `contributes.settings` drew
+// a card of seven fields, four of which the pane already decides beside the
+// thing they change - the root folder is the first setup step, the web server
+// is "Use this" on its own row, the ports are the fields next to it - so the
+// card was a second place to look for a decision, and the one that cannot show
+// you whether the port is currently bound. The remaining two are a section at
+// the bottom of the pane. The keys and their defaults are unchanged, so an
+// environment configured through the old card keeps every value.
 
 import { ctx, config, setConfig, warn } from "../runtime.js";
 import { paths } from "../core/paths.js";
 import { readJson, writeJson } from "../core/fsx.js";
 
-/** Keys owned by the extension settings card, with their fallbacks. */
+/** Keys owned by the extension settings store, with their fallbacks. */
 const SETTING_KEYS = /** @type {const} */ ([
   ["rootDir", ""],
   ["domainSuffix", "test"],
@@ -30,7 +39,7 @@ const SETTING_KEYS = /** @type {const} */ ([
 /**
  * The shape persisted in `<root>/config.json`.
  *
- * `skipTerminalPath` lives here rather than in the settings card because it is
+ * `skipTerminalPath` lives here rather than in the extension settings because it is
  * not a preference to browse and change, it is a decision already made: the
  * user was asked once whether to put this environment first on the terminal
  * PATH and said no. The card would present it as a switch someone might flip
@@ -115,8 +124,8 @@ async function saveConfig() {
 /**
  * Pin a service to a port, or clear the pin.
  *
- * Stored here rather than in the settings card because it is per service and
- * the card is a fixed list of fields. The web servers are the exception and
+ * Stored here rather than in the extension settings because it is per service,
+ * and the row it belongs on is where it can also say what is bound. The web servers are the exception and
  * deliberately so: their port is `httpPort`, a real setting, because it appears
  * in every project URL - so the dashboard writes THAT rather than a second
  * number that would then have to agree with it.

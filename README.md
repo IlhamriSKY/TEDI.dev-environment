@@ -50,6 +50,12 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
   builds matching your PHP's branch, thread-safety and architecture are offered.
 - **Nothing is removed without asking.** Every Remove here - a version, a
   project, a scheduled job - says what actually goes before it goes.
+- **Everything is set in the pane.** There is no card in TEDI's Settings to go
+  and find: the root folder is the first setup step, the web server is **Use
+  this** on its own row, the ports are the fields beside it, and the domain
+  suffix and the hosts-file switch are a short **Settings** section at the
+  bottom. Each decision sits next to the thing it changes, which is also the
+  only place that can tell you whether the port is currently bound.
 
 ## Setting it up
 

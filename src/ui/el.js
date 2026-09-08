@@ -73,6 +73,10 @@ export function h(tag, props = {}, children = []) {
   return node;
 }
 
+/** One turn of the spinning button icon, in ms. Shared with the caller that
+ *  decides how long to keep one on screen. */
+export const SPIN_MS = 900;
+
 /**
  * A button, in the app's own shape.
  *
@@ -118,7 +122,14 @@ export function button(label, onClick, opts = {}) {
   // button you pressed is where you are already looking, and it says which
   // component is busy without a second element having to name one.
   const glyph = opts.icon ? icon(opts.icon, "currentColor", iconOnly ? 14 : 13) : null;
-  if (glyph && opts.spin) glyph.style.animation = "tedi-dev-spin .9s linear infinite";
+  if (glyph && opts.spin) {
+    glyph.style.animation = `tedi-dev-spin ${SPIN_MS}ms linear infinite`;
+    // Anchored to the clock, not to when this node was built. The panel
+    // repaints on a four-second poll and each repaint is a NEW button, so
+    // without the negative delay the glyph snapped back to zero every time and
+    // what you saw was a twitch rather than a rotation.
+    glyph.style.animationDelay = `-${Date.now() % SPIN_MS}ms`;
+  }
 
   const btn = /** @type {HTMLButtonElement} */ (
     h("button", { style: `${base};${skin}`, title: opts.title }, [

@@ -143,7 +143,7 @@ async function useWebServer(id, refresh) {
  * A web server has TWO, and the second can be switched off. Plenty of local
  * work never touches HTTPS, and a certificate per project plus a CA trusted
  * into the machine's store is a real cost for something unused. The switch is
- * `autoHttps`, the same setting the Settings card carries, so turning it off
+ * `autoHttps`, so turning it off
  * drops the SSL block from every vhost and stops issuing certificates.
  *
  * @param {string} id

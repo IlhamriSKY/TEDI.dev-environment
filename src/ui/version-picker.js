@@ -6,7 +6,8 @@
 // the picker lived in the other view. Two copies of a modal that resolves a
 // version list, filters it and reports what happened is how the two drift.
 
-import { h, pill, muted, mark, modal, textInput } from "./el.js";
+import { h, pill, muted, mark, modal, textInput, SPIN_MS } from "./el.js";
+import { sleep } from "../core/proc.js";
 import { markFor } from "./marks.js";
 import { isPrerelease } from "../registry/util.js";
 import { installedOf } from "../manager/versions.js";
@@ -39,8 +40,16 @@ export async function openInstaller(p, refresh) {
   // is the button you just pressed still working.
   state.busy.set(p.id, { text: "Checking available versions", quiet: true });
   refresh();
+  const started = Date.now();
   try {
     const list = await p.versions();
+    // A version list is cached, so the second time it answers in a few tens of
+    // milliseconds - and a spinner that appears and vanishes inside one frame
+    // reads as a glitch, not as work. Held for one full turn of the icon so
+    // pressing Install always looks the same whether or not the list was
+    // already on disk.
+    const left = SPIN_MS - (Date.now() - started);
+    if (left > 0) await sleep(left);
     if (list.length === 0) {
       ctx?.ui.toast(
         p.packageHint

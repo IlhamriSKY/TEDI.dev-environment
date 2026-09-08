@@ -17,7 +17,7 @@ export function setCtx(value) {
 
 /**
  * Global configuration, mirrored from `<root>/config.json` and the extension's
- * own settings card. Read live by everything; written only through
+ * own settings store. Read live by everything; written only through
  * `manager/config.js` so the on-disk copy and this never disagree.
  *
  * @typedef {object} DevenvConfig
