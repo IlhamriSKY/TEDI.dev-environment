@@ -24,9 +24,12 @@ import { inUse } from "./ports.js";
 
 /**
  * @typedef {object} PortOwner
- * @property {number} pid
+ * @property {number} pid   The TOP of the same-executable process tree, which
+ *   is not always the process holding the socket. See `rootOf`.
  * @property {string} name  The executable, as the OS reports it. "?" when only
  *   the pid could be found, which is still enough to act on.
+ * @property {string | null} [path]  Full path to that executable, when the
+ *   platform could give one. This is what "is it ours" is decided on.
  */
 
 /**
@@ -60,13 +63,80 @@ export async function portOwner(port) {
 async function windowsOwner(port) {
   const res = await run("netstat", ["-ano", "-p", "TCP"], { timeoutMs: 15_000 });
   if (res.code !== 0) return null;
-  const pid = parseNetstat(res.out, port);
-  if (pid === null) return null;
+  const listener = parseNetstat(res.out, port);
+  if (listener === null) return null;
 
-  const named = await run("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], {
+  // Resolve the tree, the name and the path in ONE call rather than three.
+  const root = await windowsRoot(listener);
+  if (root) return root;
+
+  // The walk failed for some reason; the listening pid and its name are still
+  // better than nothing.
+  const named = await run("tasklist", ["/FI", `PID eq ${listener}`, "/FO", "CSV", "/NH"], {
     timeoutMs: 15_000,
   });
-  return { pid, name: (named.code === 0 ? parseTasklist(named.out) : null) ?? "?" };
+  return {
+    pid: listener,
+    name: (named.code === 0 ? parseTasklist(named.out) : null) ?? "?",
+    path: null,
+  };
+}
+
+/**
+ * Walk up from the listening pid while the parent runs the same executable.
+ *
+ * This is the whole reason "stop it" did not stop anything. nginx on Windows is
+ * a master plus workers, and the LISTENING socket belongs to a WORKER: killing
+ * that pid, tree and all, leaves the master to spawn a replacement which
+ * inherits the socket, so the port is never released and the button appears to
+ * do nothing. Killing the topmost nginx.exe takes the whole thing down. Apache,
+ * MySQL and PHP-FPM all have the same shape.
+ *
+ * Stops at the first parent running something ELSE, which is what keeps it from
+ * walking out of the server and into TEDI - the master's parent is this app.
+ *
+ * @param {number} pid @returns {Promise<PortOwner | null>}
+ */
+async function windowsRoot(pid) {
+  // The comparison key is the full path when it is readable and the image name
+  // when it is not. A protected system process reports NO ExecutablePath to an
+  // unelevated query, and comparing two empty strings said "same binary" for
+  // every parent - so a walk from `svchost.exe` climbed through `services.exe`
+  // all the way to `wininit.exe`, and the button would have offered to kill it.
+  const script = [
+    `$me = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}" -ErrorAction SilentlyContinue`,
+    "if (-not $me) { exit 1 }",
+    "$path = $me.ExecutablePath",
+    "$key = if ($me.ExecutablePath) { $me.ExecutablePath } else { $me.Name }",
+    "if (-not $key) { exit 1 }",
+    "for ($i = 0; $i -lt 16; $i++) {",
+    "  $pp = $me.ParentProcessId",
+    "  if (-not $pp -or $pp -le 0) { break }",
+    '  $par = Get-CimInstance Win32_Process -Filter "ProcessId=$pp" -ErrorAction SilentlyContinue',
+    "  if (-not $par) { break }",
+    "  $pk = if ($par.ExecutablePath) { $par.ExecutablePath } else { $par.Name }",
+    "  if (-not $pk -or $pk -ne $key) { break }",
+    "  $me = $par",
+    "  if ($me.ExecutablePath) { $path = $me.ExecutablePath }",
+    "}",
+    "Write-Output $me.ProcessId",
+    "Write-Output $me.Name",
+    "Write-Output $path",
+  ].join("; ");
+
+  const res = await run("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    timeoutMs: 25_000,
+  });
+  if (res.code !== 0) return null;
+  const lines = res.out
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const root = Number(lines[0]);
+  if (!Number.isInteger(root) || root <= 0) return null;
+  // Three lines when the path was readable, two when it was not - `Write-Output`
+  // of an empty value prints nothing at all rather than a blank line.
+  return { pid: root, name: lines[1] || "?", path: lines[2] ?? null };
 }
 
 /**
@@ -120,7 +190,7 @@ async function posixOwner(port) {
   }).catch(() => null);
   if (viaLsof && viaLsof.code === 0) {
     const hit = parseLsof(viaLsof.out);
-    if (hit) return hit;
+    if (hit) return { ...hit, pid: await posixRoot(hit.pid) };
   }
 
   if (isMac()) return null;
@@ -128,7 +198,40 @@ async function posixOwner(port) {
   const viaSs = await run("ss", ["-H", "-ltnp", `sport = :${port}`], {
     timeoutMs: 15_000,
   }).catch(() => null);
-  return viaSs && viaSs.code === 0 ? parseSs(viaSs.out) : null;
+  if (!viaSs || viaSs.code !== 0) return null;
+  const hit = parseSs(viaSs.out);
+  return hit ? { ...hit, pid: await posixRoot(hit.pid) } : null;
+}
+
+/**
+ * The same walk on macOS and Linux, where nginx, Apache and PHP-FPM are also a
+ * master with workers and the socket belongs to a worker.
+ *
+ * `sh -c` because this is a loop, not a command; `which()` already needs a
+ * shell for the same kind of reason. Falls back to the pid it was given, so a
+ * machine whose `ps` disagrees still gets the old behaviour rather than an
+ * error.
+ *
+ * @param {number} pid @returns {Promise<number>}
+ */
+async function posixRoot(pid) {
+  const script = [
+    `p=${pid}`,
+    "for i in 1 2 3 4 5 6 7 8; do",
+    '  pp=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d " ")',
+    '  [ -z "$pp" ] && break',
+    '  [ "$pp" -le 1 ] && break',
+    '  a=$(ps -o comm= -p "$p" 2>/dev/null)',
+    '  b=$(ps -o comm= -p "$pp" 2>/dev/null)',
+    '  [ "$a" != "$b" ] && break',
+    "  p=$pp",
+    "done",
+    'echo "$p"',
+  ].join("; ");
+
+  const res = await run("sh", ["-c", script], { timeoutMs: 20_000 }).catch(() => null);
+  const root = Number((res?.out ?? "").trim());
+  return Number.isInteger(root) && root > 0 ? root : pid;
 }
 
 /**

@@ -597,7 +597,9 @@ export async function recoverRunning() {
     const owner = await portOwner(port);
     if (!owner) continue;
 
-    const path = await processPath(owner.pid);
+    // The Windows walk already returned the path; only pay for a second lookup
+    // where it could not.
+    const path = owner.path ?? (await processPath(owner.pid));
     if (!path || !(await isOurBinary(id, row, path))) continue;
 
     setStatus(id, {

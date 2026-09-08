@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.17
+
+- **Stopping the process that holds a port now actually stops it.** nginx is a
+  master plus workers, and the listening socket belongs to a **worker** - so
+  killing the pid the OS reports left the master to spawn a replacement, which
+  inherited the socket. The port was never released and the button looked
+  broken. The lookup walks up the parent chain while the parent is running the
+  same executable, and stops at the master. Apache, MySQL and PHP-FPM all have
+  the same shape.
+
+  Found by driving a real nginx rather than by reading: which process the OS
+  names for a socket is not something the code can tell you.
+
+- **The walk stops where it should.** A protected system process reports no
+  executable path to an unelevated query, and comparing two empty paths said
+  "same binary" for every parent - so a walk from `svchost.exe` climbed through
+  `services.exe` to `wininit.exe`, and the button would have offered to end
+  that. It compares the full path when there is one and the image name when
+  there is not, and refuses to walk when it has neither.
+
 ## 0.1.16
 
 - **"Port 80 is already in use" now says by what, and offers to stop it.** That

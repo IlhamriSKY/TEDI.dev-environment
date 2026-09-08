@@ -14,7 +14,7 @@
 // extension's understanding of the host contract is right - if fsx.js only
 // worked because the real host was more forgiving, it would fail here.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
 import {
   mkdtempSync,
@@ -43,6 +43,7 @@ import { generate } from "./web/vhost.js";
 import { serverExe } from "./web/serverroot.js";
 import { start, stop, recoverRunning } from "./manager/services.js";
 import { inUse } from "./web/ports.js";
+import { portOwner, freePort } from "./web/portowner.js";
 import { run, sleep } from "./core/proc.js";
 import { ensureDirs } from "./core/fsx.js";
 import { layoutDirs, paths } from "./core/paths.js";
@@ -544,6 +545,60 @@ await step("only one web server runs: starting one stops the other", async () =>
 // the generated shim, `global.env`, `programFor`, and the host's willingness to
 // spawn a `.cmd` - and any one of them being wrong produces a job that either
 // runs the wrong runtime or does not run at all.
+// The bug that made "stop it" do nothing, driven against a real server.
+//
+// nginx is a master plus workers and the LISTENING socket belongs to a WORKER.
+// Killing that pid - tree and all - leaves the master to spawn a replacement
+// which inherits the socket, so the port is never released and the button looks
+// broken. Nothing about that is visible from reading the code: it depends on
+// which process the OS reports for the socket, which is why this starts a real
+// nginx and asks.
+await step("a port conflict names the master, and stopping it frees the port", async () => {
+  if (installedOf("nginx").length === 0) return;
+  setConfig({ webServer: "nginx", httpPort: 18080, httpsPort: 18443, autoHttps: false });
+
+  const started = await start("nginx");
+  if (started.state !== "running") {
+    throw new Error(`nginx did not start: ${started.error ?? "no reason given"}`);
+  }
+  await sleep(800);
+
+  try {
+    const owner = await portOwner(18080);
+    if (!owner) throw new Error("nothing was reported as holding a port nginx is serving");
+
+    // It must be OUR nginx, by path rather than by name.
+    if (!owner.path || !owner.path.toLowerCase().includes("nginx")) {
+      throw new Error(`reported ${owner.name} at ${owner.path ?? "an unknown path"}`);
+    }
+
+    // And it must be the MASTER: the process the socket belongs to may be a
+    // worker, and a worker's parent is another nginx.
+    const workers = await countNginx();
+    console.log(`        ${workers} nginx process(es); owner reported as pid ${owner.pid}`);
+
+    // The real assertion. If this stops only a worker, the master replaces it
+    // and the port stays bound - which is exactly what the user saw.
+    const freed = await freePort(owner, 18080);
+    if (!freed.ok) throw new Error(`freePort said: ${freed.message}`);
+    if (await inUse(18080)) throw new Error("freePort returned ok but the port is still held");
+    console.log("        stopped it, and :18080 came free");
+  } finally {
+    state.services.clear();
+    await stop("nginx").catch(() => {});
+  }
+});
+
+/** How many nginx processes exist, for the log line above. Windows only; the
+ *  count is context, never an assertion. */
+async function countNginx() {
+  if (process.platform !== "win32") return "?";
+  const res = spawnSync("tasklist", ["/FI", "IMAGENAME eq nginx.exe", "/FO", "CSV", "/NH"], {
+    encoding: "utf8",
+  });
+  return (res.stdout ?? "").split(/\r?\n/).filter((l) => l.includes("nginx.exe")).length;
+}
+
 // Recovery after a crash, which cannot be reasoned about: it depends on whether
 // a spawned child outlives the process that started it, on what the OS reports
 // as holding the port, and on whether the executable path it reports matches the
