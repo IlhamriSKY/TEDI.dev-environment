@@ -7,7 +7,7 @@
 // by something else" is a sentence a person can act on and "failed to start"
 // is not.
 
-import { h, row, pill, muted, button, status, section, mark } from "./el.js";
+import { h, row, pill, muted, button, status, section, mark, progress } from "./el.js";
 import { markFor } from "./marks.js";
 import { provider } from "../registry/index.js";
 import { installedOf } from "../manager/versions.js";
@@ -66,6 +66,11 @@ function jobSummary() {
 function serviceRow(id, refresh) {
   const p = provider(id);
   const st = state.services.get(id);
+  // Downloading right now. Servers and databases have no row in Runtimes - that
+  // section is runtimes and tools - so this is the only row that can carry
+  // their progress, and without it "Install everything" pulling nginx showed
+  // nothing anywhere once the setup gate was down.
+  const busy = state.busy.get(id);
   // An in-process service has nothing on disk, so it counts as always present:
   // the version pill, the "not installed" caption and the disabled Start button
   // are all questions about a binary it does not have.
@@ -93,8 +98,14 @@ function serviceRow(id, refresh) {
           style: "font-size:12px;font-weight:600;line-height:1.35",
         }),
         h("span", { style: "display:flex;align-items:center;gap:5px" }, [
-          status(running ? "ok" : failed ? "error" : starting ? "working" : "idle"),
-          muted(present ? stateLabel : "not installed"),
+          status(busy ? "working" : running ? "ok" : failed ? "error" : starting ? "working" : "idle"),
+          muted(
+            busy
+              ? `${busy.text}${busy.pct === undefined ? "" : ` ${busy.pct}%`}`
+              : present
+                ? stateLabel
+                : "not installed",
+          ),
         ]),
       ]),
     ],
@@ -125,7 +136,8 @@ function serviceRow(id, refresh) {
     ],
   );
 
-  const disabled = !present;
+  // Nothing to press while its own archive is still coming down.
+  const disabled = !present || Boolean(busy);
   const right = h("div", { style: "display:flex;align-items:center;gap:5px;flex:none" }, [
     running
       ? button("Stop", async () => {
@@ -149,5 +161,12 @@ function serviceRow(id, refresh) {
       : null,
   ]);
 
-  return row([left, middle, right]);
+  const line = row([left, middle, right]);
+  // Same shape the setup checklist and the runtime rows use: the bar belongs to
+  // the row doing the work, so nothing has to say which one it is measuring.
+  if (!busy) return line;
+  return h("div", { style: "display:flex;flex-direction:column;min-width:0" }, [
+    line,
+    progress(busy.pct),
+  ]);
 }

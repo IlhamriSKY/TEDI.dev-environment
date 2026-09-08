@@ -16,7 +16,15 @@
 
 import { spawn } from "node:child_process";
 import net from "node:net";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, statSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  rmSync,
+  existsSync,
+  statSync,
+} from "node:fs";
 import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -27,9 +35,10 @@ import { install, uninstall, installRoot, verify } from "./manager/install.js";
 import { scanInstalled, installedOf } from "./manager/versions.js";
 import { addProject } from "./project/projects.js";
 import { migrateLayout } from "./manager/migrate.js";
+import { iniPathFor } from "./manager/phpini.js";
 import { saveJob, runJob } from "./manager/cron.js";
 import { writeShims } from "./project/shims.js";
-import { writeGlobalEnv } from "./manager/apply.js";
+import { writeGlobalEnv, applyRuntimeChange } from "./manager/apply.js";
 import { generate } from "./web/vhost.js";
 import { serverExe } from "./web/serverroot.js";
 import { start, stop } from "./manager/services.js";
@@ -339,6 +348,46 @@ await step("scan finds both installs", async () => {
   const composer = installedOf("composer").filter((r) => r.origin === "download");
   if (node.length !== 1) throw new Error(`expected 1 downloaded node, found ${node.length}`);
   if (composer.length !== 1) throw new Error(`expected 1 composer, found ${composer.length}`);
+});
+
+// PHP, and the php.ini that has to exist the moment it is installed.
+//
+// The zip ships `php.ini-development` and `php.ini-production` and no `php.ini`
+// at all, and nothing created one: `ensureIni` was reached only by CHANGING
+// something. So a freshly installed PHP had no ini until you edited a setting -
+// the Configure dialog opened on an empty grid, and the runtime ran with no
+// `extension_dir`, which is the one directive that must be right or no
+// extension can load at all. None of that is visible without installing a real
+// PHP and looking, which is why the check lives here.
+await step("php: installs with a usable php.ini, not without one", async () => {
+  const p = provider("php");
+  const versions = await p.versions();
+  if (versions.length === 0) throw new Error("no PHP versions listed");
+  const target = (versions.find((v) => v.recommended) ?? versions[0]).version;
+
+  await install(p, target);
+  await applyRuntimeChange();
+
+  const info = await iniPathFor(target);
+  if (!info) throw new Error("PHP installed but did not resolve to an ini path");
+  if (!info.exists) throw new Error(`no php.ini was created at ${info.path}`);
+
+  const ini = readFileSync(info.path, "utf8");
+  const extDir = ini.match(/^extension_dir\s*=\s*(.+)$/m)?.[1]?.trim();
+  if (!extDir) throw new Error("php.ini has no extension_dir");
+  if (!existsSync(extDir)) throw new Error(`extension_dir points nowhere: ${extDir}`);
+  // The seeding is the whole point, so check it actually took: a template
+  // copied verbatim would leave the commented-out default in place.
+  if (!/^date\.timezone\s*=/m.test(ini)) throw new Error("php.ini was not seeded with defaults");
+
+  // And running it a second time must not rewrite what the user has since
+  // edited - `ensureIni` returns early when the file is there.
+  writeFileSync(info.path, ini + "\n; edited by hand\n");
+  await applyRuntimeChange();
+  if (!readFileSync(info.path, "utf8").includes("; edited by hand")) {
+    throw new Error("a later apply overwrote the user's php.ini");
+  }
+  console.log(`        php ${target} -> ${info.path}, extension_dir ok`);
 });
 
 // Nginx, so the config check below has both servers to hand a config to.

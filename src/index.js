@@ -21,7 +21,7 @@ import { writeShims, shimDir } from "./project/shims.js";
 import { migrateLayout, legacyShimDir } from "./manager/migrate.js";
 import { loadJobs } from "./manager/cron.js";
 import { relocateTerminalPath } from "./ui/setup.js";
-import { writeGlobalEnv } from "./manager/apply.js";
+import { writeGlobalEnv, ensurePhpInis } from "./manager/apply.js";
 import { seedDefaults } from "./manager/defaults.js";
 import { mountDashboard } from "./ui/dashboard.js";
 import { clearIconCache } from "./ui/el.js";
@@ -84,6 +84,10 @@ export async function activate(context) {
     // Anything installed but never chosen gets a default now, so the dropdowns
     // and the shims always agree about which version is active.
     await seedDefaults();
+    // Also on a plain launch, not only after an install: a PHP installed before
+    // this existed has no php.ini, and a launch that seeded nothing never
+    // reaches `applyRuntimeChange`.
+    await ensurePhpInis();
     await writeGlobalEnv();
     await refreshAllRuntimes();
   } catch (err) {

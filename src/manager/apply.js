@@ -20,12 +20,13 @@
 // is what keeps `versions -> projects -> resolve -> versions` from becoming a
 // cycle.
 
-import { scanInstalled, globalBinDirs } from "./versions.js";
+import { scanInstalled, globalBinDirs, installedOf } from "./versions.js";
+import { ensureIni } from "./phpini.js";
 import { refreshAllRuntimes } from "../project/projects.js";
 import { renderEnvFile } from "../project/shims.js";
 import { writeText } from "../core/fsx.js";
 import { paths } from "../core/paths.js";
-import { config } from "../runtime.js";
+import { config, warn } from "../runtime.js";
 
 /**
  * Write the shim fallback: what a directory with no `.tedi-runtime` resolves to.
@@ -44,6 +45,33 @@ export async function writeGlobalEnv() {
 }
 
 /**
+ * Give every managed PHP the php.ini it was installed without.
+ *
+ * A Windows PHP zip ships `php.ini-development` and `php.ini-production` and no
+ * `php.ini` at all, and nothing here created one: `ensureIni` was reached only
+ * by CHANGING something - applying a setting, enabling an extension, wiring
+ * Xdebug. So a freshly installed PHP had no ini until you edited one, which
+ * meant the Configure dialog opened on an empty settings grid and an empty
+ * editor, and the runtime itself ran with no `extension_dir`, no timezone and
+ * the compiled-in defaults. "Install PHP" has to mean a PHP you can use.
+ *
+ * Only a DOWNLOADED one. A system PHP's ini belongs to whatever put it there,
+ * and seeding it from a template would overwrite that machine's configuration
+ * with ours.
+ *
+ * Idempotent: `ensureIni` returns early when the file is already there, so this
+ * costs one existence check per installed version.
+ *
+ * @returns {Promise<void>}
+ */
+export async function ensurePhpInis() {
+  for (const row of installedOf("php")) {
+    if (row.origin !== "download") continue;
+    await ensureIni(row.version).catch((err) => warn("could not seed php.ini", row.version, err));
+  }
+}
+
+/**
  * Re-read what is installed and push the consequences everywhere.
  *
  * Call after ANY change to the set of installed versions or to the active one.
@@ -52,6 +80,7 @@ export async function writeGlobalEnv() {
  */
 export async function applyRuntimeChange() {
   await scanInstalled();
+  await ensurePhpInis();
   await writeGlobalEnv();
   await refreshAllRuntimes();
 }

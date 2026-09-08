@@ -357,6 +357,19 @@ async function setupSteps(refresh) {
   const names = CROSS_PLATFORM.map((id) => provider(id)?.label ?? id).join(", ");
   const pathSkipped = config.skipTerminalPath === true;
 
+  // Is the panel still showing ONLY this checklist?
+  //
+  // It matters because the checklist carries the install progress, and it is
+  // the right place for it exactly while nothing else is on screen. The moment
+  // the gate drops, Runtimes and Services appear and each row carries its own
+  // bar - so leaving one here too showed the same download twice, on the row
+  // that is NOT the one being worked on. Installing another PHP would light up
+  // "Install everything", a step that was already finished.
+  //
+  // Derived from the same two facts `paint()` derives `blocked` from, rather
+  // than passed in, so the two cannot disagree about when the gate is up.
+  const gated = !chosen || missing.length > 0;
+
   /** @type {Step[]} */
   const steps = [
     {
@@ -394,7 +407,7 @@ async function setupSteps(refresh) {
       // prompt must not lock the panel forever - so a missing CA is an action
       // on this row rather than a step of its own or a reason to stay blocked.
       done: chosen && missing.length === 0,
-      detail: busy
+      detail: gated && busy
         ? busy
         : !chosen
           ? "Choose the root folder first - this is where everything gets installed."
@@ -406,11 +419,9 @@ async function setupSteps(refresh) {
                 // than spliced into a clause - that produced "not been trusted
                 // yet., so https will warn".
                 `${names} installed. ${(https.reason ?? "The local certificate authority is not trusted.").replace(/\.?$/, ".")} Sites will load over https with a browser warning until it is.`,
-      // Drawn flush under this row while anything is downloading, because this
-      // is the row the work belongs to. A percentage in the text alone is a
-      // number to read; the bar is the thing you can glance at.
-      bar: busyState ? progress(busyState.pct) : undefined,
-      aside: busy
+      // Only while this checklist is the whole panel. See `gated`.
+      bar: gated && busyState ? progress(busyState.pct) : undefined,
+      aside: gated && busy
         ? undefined
         : chosen && missing.length > 0
           ? button("Install", () => void installEverything(refresh), {

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.1.5
+
+- **A freshly installed PHP now has a php.ini.** It had none. The Windows zip
+  ships `php.ini-development` and `php.ini-production` and no `php.ini` at all,
+  and the code that seeds one from the template was only ever reached by
+  CHANGING something - applying a setting, enabling an extension, wiring
+  Xdebug. So after installing PHP the Configure dialog opened on an empty
+  settings grid and an empty editor, and the runtime itself ran with no
+  `extension_dir`, no timezone and the compiled-in defaults. Installing PHP now
+  seeds it, on install and on launch, and only for a PHP this extension
+  downloaded: a system PHP's ini belongs to whatever put it there. A file you
+  have since edited is never rewritten.
+
+- **The download bar is on the row doing the work, and only there.** With the
+  setup checklist still on screen - which it is until you register the terminal
+  PATH, or decline it - installing another PHP drew a bar on "Install
+  everything" as well as on the PHP row. The same download in two places, one of
+  them a step that had already finished. The checklist carries the bar only
+  while it is the whole panel; once Runtimes and Services are up, each row
+  carries its own. Which also gave the service rows the bar they never had, so
+  an nginx or MySQL download is no longer invisible.
+
 ## 0.1.4
 
 - **The download bar is a hairline, not a second row.** It was 12px, which is
