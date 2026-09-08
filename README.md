@@ -23,14 +23,20 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
 - **Virtual hosts with HTTPS.** Every project gets `name.test` (or whatever
   suffix you choose), a generated vhost, a certificate from a local CA, and a
   hosts entry written for you.
-- **Nginx and Apache, one at a time.** Both get installed, and starting either
-  one stops the other, so there is only ever one server on the ports you
-  configured and only ever one set of rules answering your project URLs. Each
-  writes its own virtual hosts, so switching is a click.
-- **Every port is editable.** The port sits on the service row as a field while
-  the service is stopped and as a label once it is bound. A port you type is
-  never moved out from under you — if something else has it, the row says so
-  rather than quietly landing on the next one along.
+- **Nginx and Apache, one at a time.** Both get installed, **Use this** picks
+  which one your project URLs point at, and starting either stops the other — so
+  there is only ever one server on the ports you configured and one set of rules
+  answering. Each keeps its own virtual hosts, so switching is a click.
+- **Every service can install another version**, from its own row: the same
+  dropdown-and-Install pair the runtimes have. Nginx, Apache, MySQL, PostgreSQL
+  and Redis are versioned downloads like PHP and Node.
+- **Every port is editable, and HTTPS can be switched off.** The port sits on
+  the row as a field while the service is stopped and as a label once it is
+  bound. A web server shows both its ports, and the tick beside `https` turns it
+  off entirely — no certificates issued, no SSL block in the vhosts — for the
+  plenty of local work that never touches it. A port you type is never moved out
+  from under you: if something else has it, the row says so rather than quietly
+  landing on the next one along.
 - **Databases as services.** MySQL, PostgreSQL and Redis start, stop and
   initialise their data directories from the dashboard.
 - **PHP extensions and Xdebug** on Windows, with compatibility filtering: only

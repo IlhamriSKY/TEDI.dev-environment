@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.8
+
+- **Every service can install another version, from its own row.** Nginx,
+  Apache, MySQL, PostgreSQL and Redis are versioned downloads exactly like PHP
+  and Node, and the only reason they could not be installed from their own row
+  was that the picker lived in the Runtimes view. It is its own module now, so
+  there is one modal rather than two that drift. Only the scheduler has no
+  version, because it is a timer in this extension rather than a program on
+  disk.
+
+- **The web server row carries the choice and both ports.** **Use this** points
+  the project URLs at Nginx or Apache and hands over if the other one is
+  running, rather than leaving the URLs describing a server that is not the one
+  answering. Beside it are `http` and `https` as separate fields, and the tick
+  next to `https` switches it off: no certificate is issued and no SSL block is
+  written, which is the honest setting for the plenty of local work that never
+  touches TLS.
+
 ## 0.1.7
 
 - **One web server at a time.** Starting Nginx stops Apache, and the other way

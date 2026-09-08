@@ -18,11 +18,13 @@ import {
   mark,
   progress,
   input,
+  dropdown,
+  checkbox,
 } from "./el.js";
 import { markFor } from "./marks.js";
 import { provider } from "../registry/index.js";
 import { installedOf } from "../manager/versions.js";
-import { activeVersion } from "../manager/config.js";
+import { activeVersion, setActiveVersion } from "../manager/config.js";
 import {
   SERVICE_IDS,
   IN_PROCESS,
@@ -38,6 +40,8 @@ import { plannedPort, defaultPortFor, isWebServer } from "../web/ports.js";
 import { setServicePort, writeSetting } from "../manager/config.js";
 import { publish } from "../web/publish.js";
 import { openCron } from "./cron-view.js";
+import { openInstaller } from "./version-picker.js";
+import { applyRuntimeChange } from "../manager/apply.js";
 import { state, config, ctx } from "../runtime.js";
 
 /**
@@ -75,6 +79,138 @@ export function servicesView(refresh) {
   ]);
 
   return section("Services", rows, aside);
+}
+
+/**
+ * Which installed version this service runs.
+ *
+ * The same control the runtime rows have, for the same reason: switching is
+ * instant and installing is a download, so they are two controls rather than
+ * one that sometimes takes four minutes. Switching a web server's version also
+ * decides which install its generated config points at, which is why that case
+ * republishes.
+ *
+ * @param {string} id
+ * @param {import("../runtime.js").InstalledVersion[]} installed
+ * @param {() => void} refresh
+ * @returns {HTMLElement}
+ */
+function versionPicker(id, installed, refresh) {
+  if (installed.length === 0) return muted("not installed");
+  const active = activeVersion(id) ?? installed[0]?.version ?? null;
+  return dropdown(
+    installed.map((v) => ({
+      value: v.version,
+      label: v.version,
+      hint: v.origin === "system" ? "system" : undefined,
+    })),
+    active,
+    async (version) => {
+      await setActiveVersion(id, version);
+      await applyRuntimeChange();
+      if (isWebServer(id)) await publish().catch(() => {});
+      refresh();
+    },
+    { width: "112px" },
+  );
+}
+
+/**
+ * Point the project URLs at this web server.
+ *
+ * If the other one is up this hands over, rather than leaving the URLs
+ * describing a server that is not the one answering: `start` stops the other,
+ * so "use this" means it.
+ *
+ * @param {string} id @param {() => void} refresh @returns {Promise<void>}
+ */
+async function useWebServer(id, refresh) {
+  const other = id === "nginx" ? "apache" : "nginx";
+  const wasRunning = state.services.get(other)?.state === "running";
+  await writeSetting("webServer", id);
+  await publish().catch(() => {});
+  if (wasRunning) {
+    const s = await start(id);
+    if (s.state === "error" && s.error) ctx?.ui.toast(s.error, { variant: "error" });
+  }
+  refresh();
+}
+
+/**
+ * The ports this service binds.
+ *
+ * A web server has TWO, and the second can be switched off. Plenty of local
+ * work never touches HTTPS, and a certificate per project plus a CA trusted
+ * into the machine's store is a real cost for something unused. The switch is
+ * `autoHttps`, the same setting the Settings card carries, so turning it off
+ * drops the SSL block from every vhost and stops issuing certificates.
+ *
+ * @param {string} id
+ * @param {import("../runtime.js").ServiceStatus | undefined} st
+ * @param {boolean} live
+ * @param {() => void} refresh
+ * @returns {(HTMLElement | null)[]}
+ */
+function portControls(id, st, live, refresh) {
+  if (!isWebServer(id)) return [portControl(id, st, live, refresh)];
+
+  const https = config.autoHttps;
+  const box = checkbox(https);
+  box.addEventListener("click", async () => {
+    await writeSetting("autoHttps", !https);
+    await publish().catch(() => {});
+    refresh();
+  });
+
+  return [
+    labelled("http", portControl(id, st, live, refresh)),
+    // The tick is the switch, and the field beside it exists only while it is
+    // on: a port for a protocol that is off would be a number with nothing
+    // behind it.
+    h(
+      "label",
+      {
+        style: "display:inline-flex;align-items:center;gap:5px;cursor:pointer",
+        title: https
+          ? "Serving HTTPS too, with a certificate per project from the local CA."
+          : "HTTPS is off: no certificates are issued and the vhosts carry no SSL block.",
+      },
+      [box, muted("https"), https ? httpsPortField(live, refresh) : muted("off")],
+    ),
+  ];
+}
+
+/** @param {string} text @param {HTMLElement} control @returns {HTMLElement} */
+function labelled(text, control) {
+  return h("span", { style: "display:inline-flex;align-items:center;gap:5px" }, [
+    muted(text),
+    control,
+  ]);
+}
+
+/** The HTTPS port, a setting exactly like the HTTP one.
+ *  @param {boolean} live @param {() => void} refresh @returns {HTMLElement} */
+function httpsPortField(live, refresh) {
+  if (live) return pill(":" + config.httpsPort, { title: "The HTTPS port it is bound to" });
+  const field = input(
+    String(config.httpsPort),
+    async (value) => {
+      const next = Number(value.trim());
+      if (!Number.isInteger(next) || next < 1 || next > 65535) {
+        ctx?.ui.toast(value.trim() + " is not a port. Use 1 to 65535.", { variant: "error" });
+        refresh();
+        return;
+      }
+      await writeSetting("httpsPort", next);
+      await publish().catch(() => {});
+      refresh();
+    },
+    "443",
+  );
+  field.style.width = "64px";
+  field.style.textAlign = "center";
+  field.setAttribute("aria-label", "HTTPS port");
+  return field;
 }
 
 /**
@@ -156,9 +292,6 @@ function serviceRow(id, refresh) {
   const inProcess = IN_PROCESS.has(id);
   const installed = installedOf(id);
   const present = inProcess || installed.length > 0;
-  const version = inProcess
-    ? null
-    : (st?.version ?? activeVersion(id) ?? installed[0]?.version ?? null);
   const running = st?.state === "running";
   const starting = st?.state === "starting";
   const failed = st?.state === "error";
@@ -194,14 +327,17 @@ function serviceRow(id, refresh) {
     "div",
     { style: "display:flex;align-items:center;gap:6px;flex:1;min-width:0;flex-wrap:wrap" },
     [
-      version ? pill(version) : null,
+      // Every service is a versioned download like PHP and Node, so it gets the
+      // same control: switch what is installed, install another. Only the
+      // scheduler has no version, because it is a timer in this extension.
+      inProcess ? null : versionPicker(id, installed, refresh),
       // A port, for the things that bind one - and while the service is
       // stopped, the port is a FIELD rather than a label. Changing it is the
       // common reason someone opens this pane: something on the machine already
       // has 3306, or 80. A running service keeps a pill, because that number is
       // a fact about a bound socket and not a request. The scheduler binds
       // nothing, and a pill reading `:8000` beside it would be an invented fact.
-      inProcess ? null : portControl(id, st, running || starting, refresh),
+      ...(inProcess ? [] : portControls(id, st, running || starting, refresh)),
       // What the scheduler is actually carrying, which is the only thing about
       // it worth a glance: how many jobs, and whether any is running now.
       inProcess ? pill(jobSummary()) : null,
@@ -209,12 +345,15 @@ function serviceRow(id, refresh) {
       // "Start all" brings up. Only worth saying when the other is installed
       // too, because only then is a choice being made.
       isWebServer(id) && installedOf(id === "nginx" ? "apache" : "nginx").length > 0
-        ? pill(id === config.webServer ? "default" : "alternate", {
-            title:
-              id === config.webServer
-                ? "Your project URLs point here. Change which one in Settings."
-                : "Starting this stops the default: only one web server runs at a time.",
-          })
+        ? id === config.webServer
+          ? pill("default", {
+              icon: "lucide:CircleCheck",
+              title: "Your project URLs point at this one, and Start all brings it up.",
+            })
+          : button("Use this", () => void useWebServer(id, refresh), {
+              title:
+                "Point the project URLs at this server. Only one runs at a time, so a running default is handed over.",
+            })
         : null,
       failed && st?.error
         ? h("span", {
@@ -231,6 +370,13 @@ function serviceRow(id, refresh) {
     // The scheduler's contents open FROM its row, like php.ini opens from the
     // PHP row: a list you go and work on rather than a state you watch, and one
     // that does not belong under the two things this pane exists to show.
+    inProcess
+      ? null
+      : button("Install", () => p && void openInstaller(p, refresh), {
+          icon: "lucide:Download",
+          disabled: Boolean(busy),
+          title: "Install another " + (p?.label ?? id) + " version",
+        }),
     inProcess
       ? button("Jobs", () => openCron(refresh), {
           icon: "lucide:CalendarClock",

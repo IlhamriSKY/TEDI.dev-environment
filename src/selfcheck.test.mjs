@@ -421,15 +421,35 @@ console.log("\nrescan-after-change (source, because only the live app shows it)"
 // whole extension host.
 
 test("every runtime mutation is followed by applyRuntimeChange", () => {
-  const src = readFileSync(new URL("./ui/runtimes-view.js", import.meta.url), "utf8");
-  for (const mutation of ["await install(", "await uninstall(", "await setActiveVersion("]) {
-    const at = src.indexOf(mutation);
-    assert.ok(at > 0, `runtimes-view no longer calls ${mutation}`);
-    // The rescan must appear after it, in the same file.
-    assert.ok(
-      src.indexOf("applyRuntimeChange()", at) > at,
-      `${mutation} is not followed by applyRuntimeChange(); the dashboard would show stale state`,
-    );
+  // Across every view that can mutate, not one of them. The installer moved out
+  // of `runtimes-view` when the service rows gained the same control, and this
+  // check caught it - which is the whole point, but it only caught it because
+  // the file was named. So the file list is derived from the mutations rather
+  // than the other way round, and EVERY occurrence is checked, not the first.
+  const files = ["ui/runtimes-view.js", "ui/version-picker.js", "ui/services-view.js"];
+  const mutations = ["await install(", "await uninstall(", "await setActiveVersion("];
+
+  /** @type {string[]} */
+  const seen = [];
+  for (const file of files) {
+    const src = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+    for (const mutation of mutations) {
+      let at = src.indexOf(mutation);
+      while (at >= 0) {
+        seen.push(mutation);
+        assert.ok(
+          src.indexOf("applyRuntimeChange()", at) > at,
+          `${file}: ${mutation} is not followed by applyRuntimeChange(); the dashboard would show stale state`,
+        );
+        at = src.indexOf(mutation, at + 1);
+      }
+    }
+  }
+
+  // And the mutations still happen SOMEWHERE, or the loop above passes by
+  // finding nothing at all.
+  for (const mutation of mutations) {
+    assert.ok(seen.includes(mutation), `nothing calls ${mutation} any more`);
   }
 });
 
