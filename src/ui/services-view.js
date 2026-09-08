@@ -55,9 +55,10 @@ import { openInstaller } from "./version-picker.js";
 import { openAccounts } from "./mysql-view.js";
 import { viewerReady, openViewer } from "../web/viewer.js";
 import {
-  isInstalled as phpMyAdminInstalled,
+  installedVersion as phpMyAdminVersion,
   install as installPhpMyAdmin,
-  latestRelease,
+  uninstall as removePhpMyAdmin,
+  releases as phpMyAdminReleases,
   phpMyAdminUrl,
   phpSatisfies,
   writeConfig as writePhpMyAdminConfig,
@@ -425,44 +426,64 @@ function servicePortField(id, done) {
 }
 
 /**
- * phpMyAdmin: install it, or open it.
+ * phpMyAdmin: which version, whether it is there, and how to open it.
  *
- * It is a PHP app served as a project rather than a managed binary, so this row
- * is the whole of its UI - `tools/phpmyadmin.js` does the rest. Rendered
- * asynchronously because "is it installed" is a file on disk, and the dialog
- * has to be on screen before the answer arrives.
+ * Rendered asynchronously because both answers are off the machine - a file on
+ * disk and a list from phpmyadmin.net - and the dialog has to be on screen
+ * before either arrives.
  *
  * @param {() => void} refresh @returns {HTMLElement}
  */
 function phpMyAdminRow(refresh) {
   const slot = h("div", {});
   void (async () => {
-    const url = (await phpMyAdminInstalled()) ? phpMyAdminUrl() : null;
-    // phpMyAdmin states the PHP range it supports, and this extension installs
-    // 8.5 by default - so the answer is often "no". Saying it before the
-    // download is the difference between an informed choice and a white page.
+    const [installed, available] = await Promise.all([phpMyAdminVersion(), phpMyAdminReleases()]);
     const php = activeVersion("php");
-    const release = url ? null : await latestRelease();
-    const mismatch = release && !phpSatisfies(release.phpVersions, php);
-    slot.replaceChildren(
-      settingRow(
-        "phpMyAdmin",
-        url
-          ? `Served at ${url}, pointed at this MySQL.`
-          : mismatch
-            ? `Version ${release.version} supports PHP ${release.phpVersions}, and this environment is on ${php}. It will install, and may not run.`
-            : "A browser front end for MySQL, served as one of your projects.",
-        url
-          ? button("Open", () => void openFolder(url), {
-              icon: "lucide:ExternalLink",
-              title: url,
-            })
-          : button(
-              "Install",
+    let chosen = available[0]?.version ?? null;
+
+    const paint = () => {
+      const release = available.find((r) => r.version === chosen);
+      // phpmyadmin.net lists several supported branches at once, and the newest
+      // is often the one that will NOT run on the PHP this environment
+      // installs. Saying so before the download is the whole point of letting
+      // the version be chosen at all.
+      const mismatch = release && !phpSatisfies(release.phpVersions, php);
+
+      slot.replaceChildren(
+        settingRow(
+          "phpMyAdmin",
+          installed
+            ? `Version ${installed}, served at ${phpMyAdminUrl()}. It is not one of your projects and does not appear in that list.`
+            : mismatch
+              ? `${chosen} supports PHP ${release?.phpVersions}, and this environment is on ${php}. It will install, and may not run.`
+              : "A browser front end for MySQL, served on its own domain.",
+          h("div", { style: "display:flex;align-items:center;gap:5px" }, [
+            installed ? pill(installed, { icon: "lucide:CircleCheck" }) : null,
+            available.length
+              ? dropdown(
+                  available.map((r) => ({
+                    value: r.version,
+                    label: r.version,
+                    hint: r.date?.slice(0, 4),
+                  })),
+                  chosen,
+                  (version) => {
+                    chosen = version;
+                    paint();
+                  },
+                  { width: "104px" },
+                )
+              : muted("offline"),
+            button(
+              installed ? "Reinstall" : "Install",
               async () => {
+                if (!chosen) return;
                 try {
-                  const at = await installPhpMyAdmin();
-                  ctx?.ui.toast(`phpMyAdmin is served at ${at}.`, { variant: "success" });
+                  await installPhpMyAdmin(chosen);
+                  await publish().catch(() => {});
+                  ctx?.ui.toast(`phpMyAdmin ${chosen} is served at ${phpMyAdminUrl()}.`, {
+                    variant: "success",
+                  });
                 } catch (err) {
                   ctx?.ui.toast(err instanceof Error ? err.message : String(err), {
                     variant: "error",
@@ -470,10 +491,37 @@ function phpMyAdminRow(refresh) {
                 }
                 refresh();
               },
-              { icon: "lucide:Download", variant: "primary" },
+              { icon: "lucide:Download", variant: installed ? "default" : "primary" },
             ),
-      ),
-    );
+            installed
+              ? button("Open", () => void openFolder(phpMyAdminUrl()), {
+                  icon: "lucide:ExternalLink",
+                  variant: "primary",
+                  title: phpMyAdminUrl(),
+                })
+              : null,
+            installed
+              ? button(
+                  "",
+                  async () => {
+                    const ok = await confirm({
+                      title: "Remove phpMyAdmin?",
+                      description:
+                        "Its files and its virtual host go. Your databases are untouched.",
+                    });
+                    if (!ok) return;
+                    await removePhpMyAdmin();
+                    await publish().catch(() => {});
+                    refresh();
+                  },
+                  { icon: "lucide:Trash2", variant: "danger", title: "Remove phpMyAdmin" },
+                )
+              : null,
+          ]),
+        ),
+      );
+    };
+    paint();
   })();
   return slot;
 }

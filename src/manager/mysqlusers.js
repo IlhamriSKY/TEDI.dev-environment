@@ -54,6 +54,13 @@ export function sqlString(value) {
   return `'${String(value).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 }
 
+/** A path the `mysql` client will read as a path. Exported for the
+ *  self-check: the failure is an error message about a command nobody typed.
+ *  @param {string} path @returns {string} */
+export function posixPath(path) {
+  return String(path).split(String.fromCharCode(92)).join("/");
+}
+
 /**
  * Run SQL as root and return stdout.
  *
@@ -73,6 +80,13 @@ async function runSql(sql) {
   }
 
   const file = join(paths.run(), `accounts-${Date.now()}.sql`);
+  // FORWARD slashes, even on Windows. `source` hands the rest of the line to
+  // the client's OWN backslash-command parser, so a Windows path is read as
+  // the unknown command `\D` and the statement is refused with
+  // "Unknown command '\D'" - which names nothing a user could act on. The
+  // client accepts `/` on every platform and takes the rest of the line as the
+  // filename, so a space in the path is still fine.
+  const sourcePath = posixPath(file);
   try {
     await writeText(file, `${sql}\n`);
     const res = await run(
@@ -84,7 +98,7 @@ async function runSql(sql) {
         "--batch",
         "--skip-column-names",
         "--execute",
-        `source ${file}`,
+        `source ${sourcePath}`,
       ],
       { timeoutMs: 30_000 },
     );

@@ -149,6 +149,15 @@ async function projectRow(project, refresh) {
   );
 
   const right = h("div", { style: "display:flex;align-items:center;gap:5px;flex:none" }, [
+    // The URL above IS a link, and inside the app a link is a small target that
+    // has to be aimed at. This is the same destination as a button, next to the
+    // one that opens the folder, so "show me this project" is one shape whether
+    // you mean the files or the site.
+    button("Browser", () => openFolder(url), {
+      icon: "lucide:ExternalLink",
+      title: `Open ${url} in your browser`,
+      disabled: !enabled,
+    }),
     button("Folder", () => openFolder(project.path), {
       icon: "lucide:FolderOpen",
       title: `Open ${project.path} in the file manager`,

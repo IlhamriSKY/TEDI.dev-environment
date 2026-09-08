@@ -16,7 +16,9 @@ import { layoutDirs } from "./core/paths.js";
 import { scanInstalled } from "./manager/versions.js";
 import { provider } from "./registry/index.js";
 import { probeViewer } from "./web/viewer.js";
-import { writeConfig as writePhpMyAdminConfig } from "./tools/phpmyadmin.js";
+import { removeProject } from "./project/projects.js";
+import { publish } from "./web/publish.js";
+import { writeConfig as writePhpMyAdminConfig, migrateFromWww } from "./tools/phpmyadmin.js";
 import { sweepDownloads } from "./manager/install.js";
 import { refreshStatuses, startAll, stopAll, recoverRunning } from "./manager/services.js";
 import { loadProjects, refreshAllRuntimes } from "./project/projects.js";
@@ -97,6 +99,12 @@ export async function activate(context) {
     // Same reason: a database installed before this existed was never published
     // to anyone, and the reader only ever looks at the file.
     await publishHandoff();
+    // 0.1.22 installed phpMyAdmin into `www/` and registered it as a project.
+    // It is a tool this extension downloaded, not the user's work, so it moved
+    // out of that list entirely - and the copy left behind has to go with it.
+    if (await migrateFromWww(removeProject)) {
+      await publish().catch(() => {});
+    }
     // The other stored copy of the database address, for a config left behind
     // by a release that did not rewrite it.
     await writePhpMyAdminConfig();

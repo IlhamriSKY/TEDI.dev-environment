@@ -13,6 +13,7 @@
 // https://<name>.test without anyone pressing anything.
 
 import { generate } from "./vhost.js";
+import { servedProject } from "../tools/phpmyadmin.js";
 import { applyHosts } from "./hosts.js";
 import { restart } from "../manager/services.js";
 import { installedOf } from "../manager/versions.js";
@@ -43,10 +44,18 @@ export async function publish(opts = {}) {
   // that will be started.
   const servers = WEB_SERVERS.filter((id) => id === config.webServer || installedOf(id).length > 0);
 
+  // The user's projects, plus the tools this extension serves. phpMyAdmin is
+  // not a project - it lives outside `www/` and never enters the store, so
+  // nothing discovers it and it is absent from the Projects list - but it still
+  // needs a vhost, a certificate and a hosts entry, and `generate` takes a LIST
+  // rather than reading the store precisely so this can be appended here.
+  const tool = await servedProject();
+  const served = tool ? [...state.projects, tool] : state.projects;
+
   /** @type {string[]} */
   let domains = [];
   for (const server of servers) {
-    ({ domains } = await generate(state.projects, server));
+    ({ domains } = await generate(served, server));
   }
 
   let hostsOk = true;

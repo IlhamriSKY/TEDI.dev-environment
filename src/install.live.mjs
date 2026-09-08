@@ -43,7 +43,13 @@ import { generate } from "./web/vhost.js";
 import { serverExe } from "./web/serverroot.js";
 import { start, stop, recoverRunning } from "./manager/services.js";
 import { inUse, plannedPort } from "./web/ports.js";
-import { install as installPhpMyAdmin, latestRelease } from "./tools/phpmyadmin.js";
+import {
+  install as installPhpMyAdmin,
+  installedVersion as phpMyAdminVersion,
+  releases as phpMyAdminReleases,
+  servedProject,
+  phpMyAdminUrl,
+} from "./tools/phpmyadmin.js";
 import { portOwner, freePort } from "./web/portowner.js";
 import { run, sleep } from "./core/proc.js";
 import { ensureDirs } from "./core/fsx.js";
@@ -748,36 +754,58 @@ await step("a bare folder in www is a project, marker file or not", async () => 
   console.log(`        offered ${names.join(", ")}, and not again once registered`);
 });
 
-// phpMyAdmin: a real download, unpacked and registered as a served project.
+// phpMyAdmin: a real download, unpacked and served WITHOUT being a project.
 //
-// The part that cannot be read off the code is the shape of the archive. It
-// holds one `phpMyAdmin-<version>-all-languages/` directory, and serving THAT
-// would put the version in the URL and leave `index.php` one level below where
-// the vhost points - a 404 with nothing in any log to explain it.
-await step("phpMyAdmin unpacks to a served folder, not a versioned one", async () => {
+// Two things here cannot be read off the code. The archive holds one
+// `phpMyAdmin-<version>-all-languages/` directory, and serving THAT would put
+// the version in the URL and leave `index.php` a level below where the vhost
+// points - a 404 with nothing in any log to explain it. And it must not appear
+// in the projects list: it is a tool this extension downloaded, not the user's
+// work, and Disable and Remove on it would offer things that mean nothing.
+await step("phpMyAdmin unpacks flat, is served, and is not a project", async () => {
   setConfig({ autoHttps: false, webServer: "nginx", httpPort: 18080, httpsPort: 18443 });
 
-  const release = await latestRelease();
-  if (!release) {
+  const available = await phpMyAdminReleases();
+  if (available.length === 0) {
     throw new Skip("phpmyadmin.net is unreachable; nothing to check against");
   }
+  const wanted = available[0].version;
 
-  const url = await installPhpMyAdmin();
-  const dir = path.join(root, "www", "phpmyadmin");
+  await installPhpMyAdmin(wanted);
+  const dir = path.join(root, "internal", "tools", "phpmyadmin");
   if (!existsSync(path.join(dir, "index.php"))) {
     throw new Error(`index.php is not at the top of ${dir}; the wrapper was not lifted`);
   }
+  if (existsSync(path.join(root, "www", "phpmyadmin"))) {
+    throw new Error("it was installed into www/, where a scan would adopt it as a project");
+  }
+  if ((await phpMyAdminVersion()) !== wanted) {
+    throw new Error("the installed version is not what was asked for");
+  }
+  if (state.projects.some((pr) => pr.name === "phpmyadmin")) {
+    throw new Error("phpMyAdmin was registered as a project");
+  }
+
   // Its config has to name the port MySQL is actually on, or it reports the
   // server as down with no way to tell why from inside phpMyAdmin.
   const config = readFileSync(path.join(dir, "config.inc.php"), "utf8");
   if (!config.includes(`'port'] = '${plannedPort("mysql")}'`)) {
     throw new Error("config.inc.php does not point at the configured MySQL port");
   }
-  // And it is a project, which is the whole reason it is served at all.
-  if (!state.projects.some((pr) => pr.name === "phpmyadmin")) {
-    throw new Error("phpMyAdmin was unpacked but never registered as a project");
+
+  // Served anyway: the synthetic row has to reach the generated vhosts, or the
+  // domain resolves to nothing.
+  const site = path.join(root, "www", "example");
+  mkdirSync(site, { recursive: true });
+  await addProject(site, { name: "example", kind: "static" });
+  const { domains } = await generate(
+    [...state.projects, await servedProject()].filter(Boolean),
+    "nginx",
+  );
+  if (!domains.some((d) => d.startsWith("phpmyadmin."))) {
+    throw new Error(`no vhost was written for phpMyAdmin; got ${domains.join(", ")}`);
   }
-  console.log(`        phpMyAdmin ${release.version} -> ${url}`);
+  console.log(`        phpMyAdmin ${wanted} -> ${phpMyAdminUrl()}, and not in the project list`);
 });
 
 await step("uninstall removes the tree", async () => {

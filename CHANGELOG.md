@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.1.23
+
+- **Creating a MySQL account failed with `Unknown command '\D'`.** The SQL is
+  handed to the client as a file, and the path was a Windows one: a backslash
+  path reaches the client's own backslash-command parser, which
+  reads `\D` as a command it does not know and refuses the whole statement. The
+  path is written with forward slashes, which every platform's client accepts,
+  and the space in it still survives.
+
+- **phpMyAdmin is no longer one of your projects.** It was installed into `www/`
+  and registered like your own work, where Disable and Remove offered to do
+  things to it that mean nothing, and a **Refresh** would adopt it all over
+  again. It lives under `tools/` now and is served without being a project at
+  all: `publish` appends a row for it that exists for the length of one publish,
+  so it still gets its own domain, certificate and hosts entry. A copy left in
+  `www/` by 0.1.22 is cleared away on the next launch - but only when its
+  `config.inc.php` carries the line the installer wrote, so a folder you put
+  there yourself is left exactly where it is.
+
+- **The version is yours to pick**, from the list phpmyadmin.net publishes -
+  they support more than one branch at a time, and the newest is often the one
+  that will not run on the PHP this environment installs. The row shows which
+  version is installed, opens it in your browser, and can remove it.
+
+- **A Browser button on every project row.** The URL was already a link, and
+  inside the app a link is a small target to aim at; this is the same
+  destination as a button, beside the one that opens the folder.
+
 ## 0.1.22
 
 - **MySQL accounts.** Behind the gear on the MySQL row: who may connect and from

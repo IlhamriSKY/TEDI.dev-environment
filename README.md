@@ -55,9 +55,9 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
 - **Databases as services.** MySQL, PostgreSQL and Redis start, stop and
   initialise their data directories from the dashboard.
 - **MySQL accounts and phpMyAdmin**, behind the gear on the MySQL row. Add an
-  account, change a password, or install phpMyAdmin - which is served as one of
-  your projects, so it gets a domain and a certificate like everything else, and
-  is pointed at the managed MySQL for you.
+  account, change a password, or install phpMyAdmin at the version you pick. It
+  gets its own domain and certificate but is **not** one of your projects: it is
+  a tool this extension downloaded, so it stays out of that list.
 - **Open in SQL Explorer.** If you have that extension, MySQL and PostgreSQL
   rows carry a button that opens it with the connection already there. Needs
   TEDI 0.4.48; without either, the button is simply absent.

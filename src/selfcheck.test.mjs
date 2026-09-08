@@ -19,7 +19,7 @@ import { plan } from "./core/archive.js";
 import { setCtx, setConfig, state } from "./runtime.js";
 import { startsWithAll } from "./manager/config.js";
 import { parseNetstat, parseTasklist, parseLsof, parseSs } from "./web/portowner.js";
-import { parseAccounts, sqlString } from "./manager/mysqlusers.js";
+import { parseAccounts, sqlString, posixPath } from "./manager/mysqlusers.js";
 import { phpSatisfies } from "./tools/phpmyadmin.js";
 import { parseLoungeIndex } from "./registry/servers.js";
 import { matches, isValidSchedule, splitCommand } from "./manager/cron.js";
@@ -628,6 +628,22 @@ test("account rows survive the client's batch output", () => {
   assert.deepEqual(parseAccounts(""), []);
 });
 
+test("the path handed to `source` is one the client will read", () => {
+  // The bug: `source D:\DEV ENV\...` is handed to the mysql client's OWN
+  // backslash-command parser, which reads `\D` as an unknown command and
+  // refuses the whole statement with "Unknown command '\D'" - a message that
+  // names nothing the user typed and nothing they can act on.
+  const BS = String.fromCharCode(92);
+  const win = ["D:", "DEV ENV", "internal", "run", "accounts-1.sql"].join(BS);
+  const out = posixPath(win);
+  assert.ok(!out.includes(BS), "a backslash left in the path is read as a client command");
+  assert.equal(out, "D:/DEV ENV/internal/run/accounts-1.sql");
+  // `source` takes the rest of the line as the filename, so the space is fine
+  // and must not be mangled in the name of safety.
+  assert.ok(out.includes("DEV ENV"), "the space was lost");
+  assert.equal(posixPath("/already/posix"), "/already/posix");
+});
+
 test("a password cannot end its own SQL string", () => {
   // The whole reason this is escaped rather than interpolated. A quote would
   // close the literal and everything after it would be parsed as SQL.
@@ -860,18 +876,31 @@ console.log("\nasking for administrator rights");
 // raising a UAC prompt is a frightening thing to be asked for pressing "Use
 // this", and the prompt cannot even be explained by what was pressed.
 
-test("only a change to the projects can ask for administrator rights", () => {
+test("only a change to the domains can ask for administrator rights", () => {
   const server = readFileSync(new URL("./ui/services-view.js", import.meta.url), "utf8");
+
+  // The exception, and the only one: installing or removing phpMyAdmin adds or
+  // takes away `phpmyadmin.<suffix>`, which IS a hosts-file change. Everything
+  // else in this view changes the server, not the set of domains.
+  const rowAt = server.indexOf("function phpMyAdminRow(");
+  assert.ok(rowAt > 0, "phpMyAdminRow is gone; the exception below may be stale");
+  const rowEnd = server.indexOf("\n}\n", rowAt);
+
   let at = server.indexOf("publish(");
   assert.ok(at > 0, "services-view no longer publishes at all");
+  let checked = 0;
   while (at >= 0) {
-    assert.ok(
-      server.startsWith("publish({ hosts: false })", at),
-      `services-view.js: a publish() at index ${at} still syncs the hosts file; ` +
-        "nothing in that view changes a project domain",
-    );
+    if (at < rowAt || at > rowEnd) {
+      assert.ok(
+        server.startsWith("publish({ hosts: false })", at),
+        `services-view.js: a publish() at index ${at} still syncs the hosts file; ` +
+          "nothing outside phpMyAdminRow changes a domain",
+      );
+      checked++;
+    }
     at = server.indexOf("publish(", at + 1);
   }
+  assert.ok(checked > 0, "no publishes were checked, so this asserts nothing");
 
   // And the views that DO change domains must still sync, or a new project
   // resolves nowhere.
