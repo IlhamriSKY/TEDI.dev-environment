@@ -18,7 +18,7 @@ import { spawn, kill, run, isAlive, sleep, logs } from "../core/proc.js";
 import { state, config, isWindows, exeSuffix, warn, repaint } from "../runtime.js";
 import { installedOf, resolveVersion } from "./versions.js";
 import { activeVersion, startsWithAll } from "./config.js";
-import { fastcgiPort, generate } from "../web/vhost.js";
+import { fastcgiPort, generate, servedProjects } from "../web/vhost.js";
 import { phpFastCgi } from "../registry/php.js";
 import { plannedPort, portIsPinned, isWebServer, inUse, findFree } from "../web/ports.js";
 import { portOwner, processPath, killPid } from "../web/portowner.js";
@@ -97,6 +97,14 @@ export async function start(id) {
       return setStatus(id, { state: "error", handle: null, error: message });
     }
   }
+
+  // A web server without PHP serves static files and fails every .php, which
+  // passes every check this extension makes and is broken to look at. The
+  // generated vhosts point .php at a FastCGI port, so the pools are part of
+  // STARTING a web server rather than something "Start all" happens to do
+  // first - starting Apache from its own row left nothing on that port at all,
+  // and phpMyAdmin answered 503.
+  if (isWebServer(id)) await startPhpPools();
 
   // ONE web server at a time. Starting the other one stops this one first.
   //
@@ -327,7 +335,7 @@ async function planFor(id, row, port) {
         // cannot be written to at all.
         args: ["-p", paths.internal(), "-c", join(paths.conf("nginx"), "nginx.conf")],
         init: async () => {
-          await generate(state.projects, "nginx");
+          await generate(await servedProjects(), "nginx");
         },
       };
 
@@ -336,7 +344,7 @@ async function planFor(id, row, port) {
         program: await serverExe("apache", row),
         args: ["-f", join(paths.conf("apache"), "httpd.conf"), "-D", "FOREGROUND"],
         init: async () => {
-          await generate(state.projects, "apache");
+          await generate(await servedProjects(), "apache");
         },
       };
 
@@ -520,6 +528,22 @@ export async function reloadPhpPool(version) {
   return (await ensurePhpPool(version)) !== null;
 }
 
+/**
+ * Bring up a FastCGI worker for every downloaded PHP.
+ *
+ * Every one, not just the active version: a project pinned to 8.3 needs 8.3
+ * listening, and which projects are pinned is not knowable from here.
+ * Idempotent - `ensurePhpPool` checks liveness first - so calling it before
+ * each web server start costs one check per version.
+ *
+ * @returns {Promise<void>}
+ */
+async function startPhpPools() {
+  for (const row of installedOf("php")) {
+    if (row.origin === "download") await ensurePhpPool(row.version).catch(() => null);
+  }
+}
+
 /** Stop every PHP pool. @returns {Promise<void>} */
 async function stopPhpPools() {
   for (const [version, handle] of phpPools) {
@@ -699,9 +723,6 @@ export async function stopAll() {
 /** Start the web server and the PHP pools its vhosts point at.
  *  @returns {Promise<void>} */
 export async function startAll() {
-  for (const row of installedOf("php")) {
-    if (row.origin === "download") await ensurePhpPool(row.version);
-  }
   await start(config.webServer);
 
   // Every installed database too. The button says "Start all" and "Stop all"

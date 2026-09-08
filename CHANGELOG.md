@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.1.28
+
+- **PHP has never worked under Apache on Windows, and does now.** Three separate
+  faults, each hiding the next. The generated config used
+  `SetHandler proxy:fcgi://host:port`, which makes Apache append the
+  filesystem path to that URL - and on Windows a path starts with a drive
+  letter, so `...:9000` + `D:/...` parsed as the host `127.0.0.1:9000d` and
+  every request died with a DNS lookup failure. Naming the document root in a
+  `ProxyPassMatch` fixes that, but then `SCRIPT_FILENAME` reaches php-cgi as
+  the whole proxy URL and it answers "No input file specified", so it is
+  rebuilt from the document root and the script name - the same value nginx
+  sends. And there was no `DirectoryIndex`, so a directory never resolved to
+  `index.php` at all.
+
+- **Starting a web server starts the PHP it needs.** The pools were started by
+  **Start all** and by nothing else, so a server started from its own row had
+  nothing listening on the FastCGI port and failed every `.php` while looking
+  perfectly healthy.
+
+- **Everything that writes vhosts asks the same question.** `publish` served the
+  projects plus the tools this extension installs; a web server's own start
+  served only the projects - and starting a server REGENERATES its vhosts, so
+  every start silently deleted the vhost the publish before it had just
+  written. That is why phpMyAdmin resolved to another site: its config was
+  removed by the restart that was meant to load it.
+
+- **A partial generate can no longer truncate a server's config.** The vhost
+  directory was cleared before anything was rendered, so a failure left fewer
+  sites than before - and every caller swallowed the error. Bodies are rendered
+  first, and a failed publish now says so instead of returning quietly.
+
 ## 0.1.27
 
 - **A new site resolved to an old one.** `phpmyadmin.test` served the first

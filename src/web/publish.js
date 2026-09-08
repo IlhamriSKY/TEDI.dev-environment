@@ -12,13 +12,12 @@
 // which projects exist calls this now, so a new project is a working
 // https://<name>.test without anyone pressing anything.
 
-import { generate } from "./vhost.js";
-import { servedProject } from "../tools/phpmyadmin.js";
+import { generate, servedProjects } from "./vhost.js";
 import { applyHosts } from "./hosts.js";
 import { restart } from "../manager/services.js";
 import { installedOf } from "../manager/versions.js";
 import { WEB_SERVERS } from "./ports.js";
-import { state, config } from "../runtime.js";
+import { state, config, ctx, warn } from "../runtime.js";
 
 /**
  * @typedef {object} PublishResult
@@ -27,6 +26,32 @@ import { state, config } from "../runtime.js";
  * @property {string} [hostsMessage]     Why, when it could not.
  * @property {boolean} restarted         Whether the web server was reloaded.
  */
+
+/**
+ * Publish, and say so when it fails.
+ *
+ * Every call site used to be `publish().catch(() => {})`, which is how a
+ * half-written config went unnoticed for a whole evening: `generate` threw
+ * partway through Apache, the caller shrugged, and the server was left serving
+ * one site out of two with nothing on screen and nothing in the log.
+ *
+ * Still non-throwing - a UI handler that rejects is a worse outcome than a
+ * stale vhost - but the reason now reaches the log and the user.
+ *
+ * @param {{ hosts?: boolean }} [opts]
+ * @returns {Promise<void>}
+ */
+export async function republish(opts = {}) {
+  try {
+    await publish(opts);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    warn("could not publish", message);
+    ctx?.ui.toast(`The server configuration could not be written: ${message}`, {
+      variant: "error",
+    });
+  }
+}
 
 /**
  * Regenerate vhosts and certificates, sync the hosts file, reload the server.
@@ -44,13 +69,12 @@ export async function publish(opts = {}) {
   // that will be started.
   const servers = WEB_SERVERS.filter((id) => id === config.webServer || installedOf(id).length > 0);
 
-  // The user's projects, plus the tools this extension serves. phpMyAdmin is
-  // not a project - it lives outside `www/` and never enters the store, so
-  // nothing discovers it and it is absent from the Projects list - but it still
-  // needs a vhost, a certificate and a hosts entry, and `generate` takes a LIST
-  // rather than reading the store precisely so this can be appended here.
-  const tool = await servedProject();
-  const served = tool ? [...state.projects, tool] : state.projects;
+  // The user's projects plus the tools this extension serves - phpMyAdmin is
+  // not a project, but it still needs a vhost, a certificate and a hosts entry.
+  // Asked of `servedProjects` rather than assembled here, because the web
+  // server's own start regenerates the same vhosts and the two lists must be
+  // the same list.
+  const served = await servedProjects();
 
   /** @type {string[]} */
   let domains = [];

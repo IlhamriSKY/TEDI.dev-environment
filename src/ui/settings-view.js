@@ -15,7 +15,7 @@
 
 import { h, row, muted, modal, button, checkbox, input } from "./el.js";
 import { writeSetting } from "../manager/config.js";
-import { publish } from "../web/publish.js";
+import { republish } from "../web/publish.js";
 import { paths } from "../core/paths.js";
 import { config, ctx } from "../runtime.js";
 
@@ -69,7 +69,7 @@ function suffixRow(refresh) {
         return;
       }
       await writeSetting("domainSuffix", next);
-      await publish().catch(() => {});
+      await republish();
       refresh();
     },
     "test",
@@ -103,7 +103,7 @@ function hostsRow(refresh) {
   const box = checkbox(on);
   box.addEventListener("click", async () => {
     await writeSetting("manageHosts", !on);
-    if (!on) await publish().catch(() => {});
+    if (!on) await republish();
     refresh();
   });
 

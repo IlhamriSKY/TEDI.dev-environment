@@ -20,7 +20,8 @@
 
 import { paths, join } from "../core/paths.js";
 import { writeText, mkdirp, remove, readDir } from "../core/fsx.js";
-import { config } from "../runtime.js";
+import { config, state } from "../runtime.js";
+import { servedProject } from "../tools/phpmyadmin.js";
 import { domainOf, docRootOf } from "../project/projects.js";
 import { resolveProject } from "../project/resolve.js";
 import { resolveVersion } from "../manager/versions.js";
@@ -48,6 +49,23 @@ export function fastcgiPort(version) {
 }
 
 /**
+ * Everything this environment serves: the user's projects, plus the tools it
+ * installed that need a domain of their own.
+ *
+ * ONE answer, because there were two. `publish` appended phpMyAdmin and the web
+ * server's own start did not - and starting a server REGENERATES its vhosts, so
+ * every start quietly deleted the vhost the publish before it had just written.
+ * The symptom was a tool that resolved to whichever site happened to be first,
+ * and it only showed on the server that actually got restarted.
+ *
+ * @returns {Promise<import("../runtime.js").Project[]>}
+ */
+export async function servedProjects() {
+  const tool = await servedProject();
+  return tool ? [...state.projects, tool] : state.projects;
+}
+
+/**
  * Configuration for every enabled project, for one server.
  *
  * @param {Project[]} projects
@@ -57,12 +75,6 @@ export function fastcgiPort(version) {
 export async function generate(projects, server = config.webServer) {
   const vhostDir = paths.vhosts(server);
   await mkdirp(vhostDir);
-
-  // Clear stale vhosts: a renamed or removed project must stop being served,
-  // and leaving its file behind would keep the old domain answering.
-  for (const entry of await readDir(vhostDir, true)) {
-    await remove(join(vhostDir, entry.name)).catch(() => {});
-  }
 
   // The install this config will actually be handed to, resolved the same way
   // `services.js` resolves the binary it starts. Reading `installedOf(id)[0]`
@@ -86,6 +98,9 @@ export async function generate(projects, server = config.webServer) {
 
   /** @type {string[]} */
   const domains = [];
+  /** Rendered and held, not written, until every project has succeeded. */
+  /** @type {{ name: string, body: string }[]} */
+  const files = [];
   let written = 0;
 
   for (const project of projects) {
@@ -111,9 +126,28 @@ export async function generate(projects, server = config.webServer) {
             ports,
           });
 
-    await writeText(join(vhostDir, `${domain}.conf`), body);
+    files.push({ name: `${domain}.conf`, body });
     domains.push(domain);
     written++;
+  }
+
+  // Everything rendered, so now - and only now - the directory is replaced.
+  //
+  // It used to be cleared FIRST. Anything that threw partway then left the
+  // server with fewer sites than it had, and every caller swallows a failed
+  // publish, so the symptom was a domain that had worked yesterday quietly
+  // resolving to whichever vhost happened to be first. It cost an evening:
+  // nginx had two vhosts and Apache one, from the same publish, four seconds
+  // apart.
+  //
+  // Rendering first also means a failure changes nothing at all, which is the
+  // right outcome for a config generator whose input is off the network and off
+  // the disk.
+  for (const entry of await readDir(vhostDir, true)) {
+    await remove(join(vhostDir, entry.name)).catch(() => {});
+  }
+  for (const file of files) {
+    await writeText(join(vhostDir, file.name), file.body);
   }
 
   if (server === "nginx") {
@@ -239,6 +273,11 @@ function apacheVhost({ project, domain, root, runtime, cert, server, ports }) {
     `    ServerName ${domain}`,
     `    ServerAlias www.${domain}`,
     `    DocumentRoot "${conf(root)}"`,
+    // Static names FIRST. `ProxyPassMatch` proxies `.php` whether or not the file
+    // exists, so mod_dir treats `index.php` as a valid index for a directory that
+    // has none - and a plain HTML site answered 404 from PHP instead of serving
+    // its own index.
+    "    DirectoryIndex index.html index.htm index.php",
     `    ErrorLog "${logFile(domain, server, "error")}"`,
     `    CustomLog "${logFile(domain, server, "access")}" common`,
     "",
@@ -261,9 +300,19 @@ function apacheVhost({ project, domain, root, runtime, cert, server, ports }) {
       "",
       // proxy_fcgi is how Apache talks to a FastCGI pool without mod_php, which
       // is what lets two PHP versions serve at the same time.
-      `    <FilesMatch "\\.php$">`,
-      `        SetHandler "proxy:fcgi://127.0.0.1:${php}"`,
-      "    </FilesMatch>",
+      // ProxyPassMatch with the document root spelled out, NOT `SetHandler
+      // proxy:fcgi://host:port`. `SetHandler` makes mod_proxy_fcgi append the
+      // filesystem path to the URL, and on Windows that path starts with a
+      // drive letter - so `...:9000` + `D:/DEV ENV/...` parses as the authority
+      // `127.0.0.1:9000d` and every request dies with "DNS lookup failure for:
+      // 127.0.0.1:9000d". Naming the root leaves nothing to concatenate.
+      `    ProxyPassMatch "^/(.*\\.php(/.*)?)$" "fcgi://127.0.0.1:${php}/${conf(root)}/$1"`,
+      // And SCRIPT_FILENAME is REBUILT rather than passed through. Apache
+      // hands the backend the whole proxy URL, and php-cgi answers that with
+      // "No input file specified." - so it is composed from the document root
+      // and the script name, which is exactly what nginx sends and the only
+      // form php-cgi opens on Windows.
+      `    ProxyFCGISetEnvIf "true" SCRIPT_FILENAME "${conf(root)}%{reqenv:SCRIPT_NAME}"`,
     );
   }
 

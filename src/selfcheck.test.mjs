@@ -606,6 +606,46 @@ test("every Remove asks first", () => {
   }
 });
 
+console.log("\nwhat gets a vhost");
+
+// The one that took an evening. `publish` served the user's projects PLUS the
+// tools this extension installs; the web server's own start served only the
+// projects - and starting a server REGENERATES its vhosts, so every start
+// silently deleted the vhost the publish before it had just written. It showed
+// only on the server that actually got restarted, which is why nginx had two
+// vhosts and Apache one from the same publish.
+
+test("everything that writes vhosts asks the same question", () => {
+  for (const file of ["manager/services.js", "web/publish.js"]) {
+    const src = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+    assert.ok(
+      !/generate\(state\.projects/.test(src),
+      `${file} generates vhosts from the projects alone, dropping the tools this extension serves`,
+    );
+  }
+  const svc = readFileSync(new URL("./manager/services.js", import.meta.url), "utf8");
+  assert.match(
+    svc,
+    /generate\(await servedProjects\(\)/,
+    "starting a web server no longer regenerates from the full served list",
+  );
+  const pub = readFileSync(new URL("./web/publish.js", import.meta.url), "utf8");
+  assert.match(pub, /await servedProjects\(\)/, "publish no longer uses the shared list");
+});
+
+test("a partial generate cannot leave a server with fewer sites", () => {
+  // The directory used to be cleared FIRST, so anything that threw partway left
+  // the server serving a subset - and every caller swallowed the failure.
+  const src = readFileSync(new URL("./web/vhost.js", import.meta.url), "utf8");
+  const clearAt = src.indexOf("for (const entry of await readDir(vhostDir, true))");
+  const renderAt = src.indexOf("files.push({ name:");
+  assert.ok(clearAt > 0 && renderAt > 0, "generate no longer clears or renders as expected");
+  assert.ok(
+    renderAt < clearAt,
+    "the vhost directory is cleared before the bodies are rendered, so a failure truncates it",
+  );
+});
+
 console.log("\npublishing reaches the server that is running");
 
 // A new site resolved to an old one: every vhost was regenerated and then the
@@ -1004,19 +1044,19 @@ test("only a change to the domains can ask for administrator rights", () => {
   assert.ok(rowAt > 0, "phpMyAdminRow is gone; the exception below may be stale");
   const rowEnd = server.indexOf("\n}\n", rowAt);
 
-  let at = server.indexOf("publish(");
+  let at = server.indexOf("republish(");
   assert.ok(at > 0, "services-view no longer publishes at all");
   let checked = 0;
   while (at >= 0) {
     if (at < rowAt || at > rowEnd) {
       assert.ok(
-        server.startsWith("publish({ hosts: false })", at),
-        `services-view.js: a publish() at index ${at} still syncs the hosts file; ` +
+        server.startsWith("republish({ hosts: false })", at),
+        `services-view.js: a republish() at index ${at} still syncs the hosts file; ` +
           "nothing outside phpMyAdminRow changes a domain",
       );
       checked++;
     }
-    at = server.indexOf("publish(", at + 1);
+    at = server.indexOf("republish(", at + 1);
   }
   assert.ok(checked > 0, "no publishes were checked, so this asserts nothing");
 
@@ -1026,8 +1066,26 @@ test("only a change to the domains can ask for administrator rights", () => {
     const src = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
     assert.match(
       src,
-      /await publish\(\)/,
+      /await republish\(\)|await publish\(\)/,
       `${file} never syncs the hosts file, so its domains would resolve nowhere`,
+    );
+  }
+});
+
+test("a failed publish is never swallowed", () => {
+  // `publish().catch(() => {})` at every call site is how a half-written config
+  // went unnoticed: `generate` threw partway through Apache and the server was
+  // left serving one site out of two, with nothing on screen and nothing logged.
+  for (const file of [
+    "index.js",
+    "ui/projects-view.js",
+    "ui/services-view.js",
+    "ui/settings-view.js",
+  ]) {
+    const src = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+    assert.ok(
+      !/publish\([^)]*\)\.catch\(\(\) => \{\}\)/.test(src),
+      `${file} swallows a failed publish again; use republish, which reports it`,
     );
   }
 });

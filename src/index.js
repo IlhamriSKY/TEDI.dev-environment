@@ -17,7 +17,7 @@ import { scanInstalled } from "./manager/versions.js";
 import { provider } from "./registry/index.js";
 import { probeViewer } from "./web/viewer.js";
 import { removeProject } from "./project/projects.js";
-import { publish } from "./web/publish.js";
+import { publish, republish } from "./web/publish.js";
 import {
   writeConfig as writePhpMyAdminConfig,
   installedVersion as phpMyAdminVersion,
@@ -107,7 +107,7 @@ export async function activate(context) {
     // It is a tool this extension downloaded, not the user's work, so it moved
     // out of that list entirely - and the copy left behind has to go with it.
     if (await migrateFromWww(removeProject)) {
-      await publish().catch(() => {});
+      await republish();
     }
     // The other stored copy of the database address, for a config left behind
     // by a release that did not rewrite it.

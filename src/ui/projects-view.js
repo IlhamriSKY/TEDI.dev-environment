@@ -33,7 +33,7 @@ import { installedOf } from "../manager/versions.js";
 import { paths, join } from "../core/paths.js";
 import { openFolder } from "../core/proc.js";
 import { mkdirp, exists } from "../core/fsx.js";
-import { publish } from "../web/publish.js";
+import { publish, republish } from "../web/publish.js";
 import { state, config, ctx } from "../runtime.js";
 
 /** @typedef {import("../runtime.js").Project} Project */
@@ -176,7 +176,7 @@ async function projectRow(project, refresh) {
       async () => {
         await updateProject(project.id, { enabled: !enabled });
         // A disabled project has to stop being SERVED, not just look grey.
-        await publish().catch(() => {});
+        await republish();
         refresh();
       },
       enabled
@@ -194,7 +194,7 @@ async function projectRow(project, refresh) {
         });
         if (!ok) return;
         await removeProject(project.id);
-        await publish().catch(() => {});
+        await republish();
         refresh();
       },
       { variant: "danger" },

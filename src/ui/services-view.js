@@ -49,7 +49,7 @@ import {
 } from "../manager/config.js";
 import { publishHandoff } from "../manager/handoff.js";
 import { freePort } from "../web/portowner.js";
-import { publish } from "../web/publish.js";
+import { republish } from "../web/publish.js";
 import { openCron } from "./cron-view.js";
 import { openInstaller } from "./version-picker.js";
 import { openAccounts } from "./mysql-view.js";
@@ -145,7 +145,7 @@ function versionPicker(id, installed, refresh) {
       await setActiveVersion(id, version);
       await applyRuntimeChange();
       // Same reason as every other publish in this view: see `useWebServer`.
-      if (isWebServer(id)) await publish({ hosts: false }).catch(() => {});
+      if (isWebServer(id)) await republish({ hosts: false });
       refresh();
     },
     { width: "112px" },
@@ -170,7 +170,7 @@ async function useWebServer(id, refresh) {
   // answer on the same address. Publishing WITH the sync meant switching from
   // Apache to nginx could raise an administrator prompt, which is a frightening
   // thing to be asked for ticking a box.
-  await publish({ hosts: false }).catch(() => {});
+  await republish({ hosts: false });
   if (wasRunning) {
     const s = await start(id);
     if (s.state === "error" && s.error) ctx?.ui.toast(s.error, { variant: "error" });
@@ -393,7 +393,7 @@ function httpsSwitch(done) {
   box.addEventListener("click", async () => {
     await writeSetting("autoHttps", !on);
     // No domain changes when HTTPS goes off; only the vhosts do.
-    await publish({ hosts: false }).catch(() => {});
+    await republish({ hosts: false });
     done();
   });
   return box;
@@ -407,7 +407,7 @@ function webPortField(key, fallback, done) {
   return portField(String(config[key]), String(fallback), async (next) => {
     await writeSetting(key, next ?? fallback);
     // A port lives in the vhost, never in the hosts file.
-    await publish({ hosts: false }).catch(() => {});
+    await republish({ hosts: false });
     done();
   });
 }
@@ -481,7 +481,7 @@ function phpMyAdminRow(refresh) {
                 if (!chosen) return;
                 try {
                   await installPhpMyAdmin(chosen);
-                  await publish().catch(() => {});
+                  await republish();
                   ctx?.ui.toast(`phpMyAdmin ${chosen} is served at ${phpMyAdminUrl()}.`, {
                     variant: "success",
                   });
@@ -505,7 +505,7 @@ function phpMyAdminRow(refresh) {
                     });
                     if (!ok) return;
                     await removePhpMyAdmin();
-                    await publish().catch(() => {});
+                    await republish();
                     refresh();
                   },
                   { icon: "lucide:Trash2", variant: "danger", title: "Remove phpMyAdmin" },
