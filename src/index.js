@@ -128,22 +128,32 @@ export async function activate(context) {
   context.registerCommandHandler("tedi.devenv.stopAll", () => void stopAll());
 
   /**
-   * The status item, lit while anything is up.
+   * The status item: lit while anything is up, breathing while anything is
+   * still coming up.
    *
-   * `tone: "success"` is the app's own active tint - the same green the SSH and
-   * AI-CLI indicators use - so a glance at the bar answers "is my environment
-   * running" without opening anything. Dim means nothing is up, which is a real
-   * answer rather than an absence: the icon is always there.
+   * The host paints an extension's status icon in ONE colour and offers three
+   * states through `tone` - lit (`success`), breathing (`warning`), and a red
+   * dot (`error`). So the two little LEDs on the server glyph cannot be tinted
+   * or animated separately from here, however much they look like they were
+   * drawn for it: a `data:` SVG is rendered as a CSS mask, which is a shape
+   * painted in a single `background-color`, and nothing inside it animates.
+   *
+   * What that leaves is a real three-state readout rather than a decoration.
+   * Starting breathes, running is lit, nothing is dim - and dim is an answer,
+   * not an absence, because the icon is always there.
    */
   const syncStatus = () => {
-    const running = [...state.services.values()].filter((s) => s.state === "running");
+    const all = [...state.services.values()];
+    const running = all.filter((s) => s.state === "running");
+    const starting = all.filter((s) => s.state === "starting");
     const names = running.map((s) => provider(s.id)?.label ?? s.id);
     context.statusBar.setItem({
       id: STATUS_ITEM,
       icon: "lucide:Server",
-      tone: running.length > 0 ? "success" : "default",
-      tooltip:
-        running.length > 0
+      tone: starting.length > 0 ? "warning" : running.length > 0 ? "success" : "default",
+      tooltip: starting.length
+        ? `Dev Environment: starting ${starting.map((s) => provider(s.id)?.label ?? s.id).join(", ")}`
+        : running.length > 0
           ? `Dev Environment: ${names.join(", ")} running`
           : "Dev Environment: nothing running",
       onClick: open,

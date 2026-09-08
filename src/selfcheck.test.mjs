@@ -627,10 +627,13 @@ test("a service starting or stopping reaches the status bar", () => {
   );
 
   const index = readFileSync(new URL("./index.js", import.meta.url), "utf8");
+  // Three states, in the only vocabulary the host offers an extension icon:
+  // breathing while something is coming up, lit once it is, dim when nothing
+  // is. Per-dot colour is not on the list - see `syncStatus`.
   assert.match(
     index,
-    /tone: running\.length > 0 \? "success" : "default"/,
-    "the status item no longer lights up while something is running",
+    /tone: starting\.length > 0 \? "warning" : running\.length > 0 \? "success" : "default"/,
+    "the status item no longer reports starting, running and idle as three states",
   );
   // A late callback firing into a torn-down context is the classic version of
   // this bug, and the one that survives a reload as a hard-to-place error.

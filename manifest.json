@@ -2,7 +2,7 @@
   "$schema": "./manifest.schema.json",
   "id": "tedi.devenv",
   "name": "Dev Environment",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "description": "A complete local development environment managed from inside TEDI, on Windows, macOS and Linux. Downloads and manages its own PHP, Node.js, MySQL, MariaDB, PostgreSQL, Redis, Nginx, Apache and Composer, none of it shared with anything already on the machine. PHP and Node.js install side by side at any number of versions, and a project pins its own without touching the global default, so a terminal opened in that project resolves the runtime the project asked for. Virtual hosts are generated per project with a configurable suffix, HTTPS is issued from a local CA that is trusted once, hosts entries are written for you under a single elevation prompt, and ports are allocated around whatever is already listening. Scheduled jobs run on real cron expressions and resolve each job's runtime from the folder it runs in. Nothing is hardcoded: every version list, download URL and path is metadata resolved at runtime.",
   "author": "IlhamRiski - ilhamriski.com",
   "homepage": "https://tedi.ilhamriski.com/",

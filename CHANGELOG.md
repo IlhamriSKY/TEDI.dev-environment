@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.19
+
+- **The status-bar icon reports three states, not two.** Breathing while a
+  service is coming up, lit once something is running, dim when nothing is - and
+  the tooltip names what. Dim is an answer rather than an absence, because the
+  icon is always there.
+
+  The two little LEDs on the server glyph cannot be lit separately, however much
+  they look like they were drawn for it: the host paints an extension's status
+  icon as a single-colour mask, so nothing inside the shape can carry its own
+  colour or its own animation. Three states is what the mechanism actually
+  offers, so that is what it says.
+
 ## 0.1.18
 
 - **Stopping the process on a port does exactly that, and nothing else.** It
