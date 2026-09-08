@@ -604,6 +604,39 @@ test("every Remove asks first", () => {
   }
 });
 
+console.log("\nthe status bar follows what is running");
+
+// The bar is what you read when the pane is CLOSED, and the poll that drives
+// the pane only runs while a pane is mounted - so driving the bar from there
+// would leave it stale in exactly the case it exists for. It hangs off the same
+// state transition the repaint does.
+
+test("a service starting or stopping reaches the status bar", () => {
+  const src = readFileSync(new URL("./manager/services.js", import.meta.url), "utf8");
+  const at = src.indexOf("function setStatus(");
+  assert.ok(at > 0, "setStatus is gone");
+  const body = src.slice(at, src.indexOf("\n}", at));
+  assert.match(
+    body,
+    /patch\.state !== undefined && patch\.state !== before/,
+    "setStatus no longer guards on a real change, so the poll would repaint every tick",
+  );
+  assert.ok(
+    body.includes("state.onServices?.()"),
+    "a state change no longer reaches the status bar",
+  );
+
+  const index = readFileSync(new URL("./index.js", import.meta.url), "utf8");
+  assert.match(
+    index,
+    /tone: running\.length > 0 \? "success" : "default"/,
+    "the status item no longer lights up while something is running",
+  );
+  // A late callback firing into a torn-down context is the classic version of
+  // this bug, and the one that survives a reload as a hard-to-place error.
+  assert.match(index, /state\.onServices = null;/, "deactivate leaves the sync callback attached");
+});
+
 console.log("\nwho is holding the port");
 
 // "Port 80 is already in use" is true and useless. Naming the process is the

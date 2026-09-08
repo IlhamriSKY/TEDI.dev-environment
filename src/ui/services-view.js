@@ -30,6 +30,7 @@ import { activeVersion, setActiveVersion } from "../manager/config.js";
 import {
   SERVICE_IDS,
   IN_PROCESS,
+  clearConflict,
   start,
   stop,
   restart,
@@ -211,7 +212,7 @@ function rowTick(id, refresh) {
 }
 
 /**
- * Stop whatever is holding the port, then start this service.
+ * Stop whatever is holding the port. Only that.
  *
  * Behind a confirmation naming the process and its pid, because it ends
  * somebody's program - possibly one they meant to be running. The button only
@@ -230,8 +231,9 @@ function freeButton(id, conflict, refresh) {
       const ok = await confirm({
         title: `Stop ${conflict.name}?`,
         description:
-          `Process ${conflict.pid} is listening on port ${conflict.port}. Stopping it frees the ` +
-          `port so ${provider(id)?.label ?? id} can bind, and ends whatever that program was doing.`,
+          `Process ${conflict.pid} is listening on port ${conflict.port}. Stopping it ends ` +
+          `whatever that program was doing and frees the port, so ${provider(id)?.label ?? id} ` +
+          `can then be started.`,
         confirmLabel: "Stop it",
         icon: "lucide:CircleStop",
       });
@@ -244,16 +246,19 @@ function freeButton(id, conflict, refresh) {
         refresh();
         return;
       }
-      // Freed it because this service wanted it, so try again rather than
-      // making the user press Start as a second step.
-      const s = await start(id);
-      if (s.state === "error" && s.error) ctx?.ui.toast(s.error, { variant: "error" });
+      // And nothing else. Starting the service from here looked helpful and
+      // was not: one button doing two things means that when the second one
+      // fails there is no way to tell which half went wrong, and a service that
+      // starts and then stops on its own reads as "the Stop button broke it".
+      // The port is free; press Start and see what Start says.
+      clearConflict(id);
+      ctx?.ui.toast(`Port ${conflict.port} is free.`, { variant: "success" });
       refresh();
     },
     {
       variant: "danger",
       icon: "lucide:CircleStop",
-      title: `Stop pid ${conflict.pid} and start ${provider(id)?.label ?? id} on port ${conflict.port}`,
+      title: `Stop pid ${conflict.pid} so ${provider(id)?.label ?? id} can bind port ${conflict.port}`,
     },
   );
 }

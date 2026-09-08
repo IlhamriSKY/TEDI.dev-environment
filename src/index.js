@@ -14,6 +14,7 @@ import { loadConfig } from "./manager/config.js";
 import { ensureDirs } from "./core/fsx.js";
 import { layoutDirs } from "./core/paths.js";
 import { scanInstalled } from "./manager/versions.js";
+import { provider } from "./registry/index.js";
 import { sweepDownloads } from "./manager/install.js";
 import { refreshStatuses, startAll, stopAll, recoverRunning } from "./manager/services.js";
 import { loadProjects, refreshAllRuntimes } from "./project/projects.js";
@@ -126,12 +127,30 @@ export async function activate(context) {
   context.registerCommandHandler("tedi.devenv.startAll", () => void startAll());
   context.registerCommandHandler("tedi.devenv.stopAll", () => void stopAll());
 
-  context.statusBar.setItem({
-    id: STATUS_ITEM,
-    icon: "lucide:Server",
-    tooltip: "Dev Environment",
-    onClick: open,
-  });
+  /**
+   * The status item, lit while anything is up.
+   *
+   * `tone: "success"` is the app's own active tint - the same green the SSH and
+   * AI-CLI indicators use - so a glance at the bar answers "is my environment
+   * running" without opening anything. Dim means nothing is up, which is a real
+   * answer rather than an absence: the icon is always there.
+   */
+  const syncStatus = () => {
+    const running = [...state.services.values()].filter((s) => s.state === "running");
+    const names = running.map((s) => provider(s.id)?.label ?? s.id);
+    context.statusBar.setItem({
+      id: STATUS_ITEM,
+      icon: "lucide:Server",
+      tone: running.length > 0 ? "success" : "default",
+      tooltip:
+        running.length > 0
+          ? `Dev Environment: ${names.join(", ")} running`
+          : "Dev Environment: nothing running",
+      onClick: open,
+    });
+  };
+  state.onServices = syncStatus;
+  syncStatus();
 
   // Poll only while something is mounted. An extension that keeps a timer
   // running against a pane nobody has open is a background cost the user cannot
@@ -191,6 +210,9 @@ export async function deactivate() {
 
   state.views.clear();
   state.onOpen = null;
+  // The status-bar sync closes over the context being torn down, so a late
+  // `setStatus` would call `statusBar.setItem` on a host that has let go of us.
+  state.onServices = null;
   // Each cached icon is a live React root the host mounted for us. Dropping the
   // cache here means a reload starts from an empty one rather than holding
   // nodes that belong to a torn-down context.

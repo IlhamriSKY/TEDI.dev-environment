@@ -150,6 +150,13 @@ export const state = {
    *  also what makes the status poll run at all. @type {Set<() => void>} */
   views: new Set(),
 
+  /** Set by activate() so the status bar can follow a service starting or
+   *  stopping. The poll only runs while a pane is MOUNTED, so the bar cannot be
+   *  driven from there: it would go stale the moment the pane was closed, which
+   *  is exactly when the bar is the only thing left saying anything.
+   *  @type {(() => void) | null} */
+  onServices: null,
+
   /** Set by activate() so the status item and commands share one implementation
    *  without statusbar.js importing index.js and closing a cycle.
    *  @type {(() => void) | null} */

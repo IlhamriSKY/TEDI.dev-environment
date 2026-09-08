@@ -473,7 +473,11 @@ if (process.platform === "win32") {
 await step("the generated config is accepted by the server it was written for", async () => {
   const site = path.join(root, "www", "example");
   mkdirSync(site, { recursive: true });
-  setConfig({ autoHttps: false, webServer: "nginx" });
+  // A HIGH port, because this nginx build's `-t` opens the listening sockets as
+  // well as parsing the file: left on the default 80 the check depended on the
+  // running machine's port 80 being free, and failed with a bind error about a
+  // server that has nothing to do with it.
+  setConfig({ autoHttps: false, webServer: "nginx", httpPort: 18080, httpsPort: 18443 });
   await scanInstalled();
 
   const project = await addProject(site, { name: "example", kind: "static" });

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.18
+
+- **Stopping the process on a port does exactly that, and nothing else.** It
+  used to free the port and then start the service, which looked helpful and was
+  not: one button doing two things means that when the second one fails there is
+  no way to tell which half went wrong, and a service that starts and then stops
+  on its own reads as "the Stop button broke it". Press Start and see what Start
+  says.
+
+- **"It stopped by itself" now says why.** A service that exits without being
+  asked to went quietly back to "stopped", which is the least useful thing it
+  could say: the reason was sitting in a buffer nobody read. The process's own
+  last words go on the row instead, the same way a failed start already reports
+  them.
+
+- **The status-bar icon lights up while anything is running**, in the app's own
+  active tint, and its tooltip names what. It follows the same state change the
+  pane does rather than the poll, because the poll only runs while a pane is
+  open - which is exactly when the bar is not the thing you are looking at.
+
 ## 0.1.17
 
 - **Stopping the process that holds a port now actually stops it.** nginx is a

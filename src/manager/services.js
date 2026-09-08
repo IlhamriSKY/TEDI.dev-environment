@@ -64,7 +64,12 @@ function setStatus(id, patch) {
   // Only on a real change of `state`, which is what keeps the poll's own
   // no-change ticks from repainting: `refreshStatuses` calls this for every
   // service on every tick.
-  if (patch.state !== undefined && patch.state !== before) repaint();
+  if (patch.state !== undefined && patch.state !== before) {
+    repaint();
+    // The status bar too, and not through `repaint`: that only reaches MOUNTED
+    // panes, and the bar is what you read when the pane is closed.
+    state.onServices?.();
+  }
   return s;
 }
 
@@ -546,7 +551,7 @@ export async function refreshStatuses() {
     const s = statusOf(id);
     if (s.state !== "running") continue;
     if (s.handle !== null) {
-      if (!(await isAlive(s.handle))) setStatus(id, { state: "stopped", handle: null });
+      if (!(await isAlive(s.handle))) await died(id, s.handle);
       continue;
     }
     // Adopted, so there is no handle to ask. The port is the liveness check:
@@ -556,6 +561,45 @@ export async function refreshStatuses() {
       setStatus(id, { state: "stopped", adopted: null });
     }
   }
+}
+
+/**
+ * A service that was running has exited without being asked to.
+ *
+ * The row used to go quietly back to "stopped", which is the least useful thing
+ * it could say: something the user started is gone and the reason is in a
+ * buffer nobody reads. The process's OWN last words go on the row instead, the
+ * same way a failed start already reports them - "it stopped by itself" is a
+ * question, and the answer was already in hand.
+ *
+ * @param {string} id @param {number} handle @returns {Promise<void>}
+ */
+async function died(id, handle) {
+  const out = await logs(handle).catch(() => null);
+  const tail = (typeof out === "string" ? out : (out?.bytes ?? ""))
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-3)
+    .join(" ");
+  setStatus(id, {
+    state: "error",
+    handle: null,
+    error: `${id} stopped on its own.${tail ? ` ${tail}` : ""}`,
+  });
+}
+
+/**
+ * Forget a recorded port conflict.
+ *
+ * Called once the port has actually been freed. Without it the row keeps
+ * offering to stop a process that is already gone, and the button's own success
+ * is the thing that makes it look broken.
+ *
+ * @param {string} id @returns {void}
+ */
+export function clearConflict(id) {
+  setStatus(id, { conflict: null, error: null, state: "stopped" });
 }
 
 /**

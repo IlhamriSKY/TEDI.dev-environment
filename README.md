@@ -56,7 +56,11 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
   initialise their data directories from the dashboard.
 - **A port conflict names the culprit.** "Port 80 is already in use" tells you
   nothing you can act on, so the row says which process holds it and offers to
-  stop it - behind a confirmation naming exactly what is about to end.
+  stop it - behind a confirmation naming exactly what is about to end. Stopping
+  it frees the port and does nothing else; starting the service is still yours
+  to press.
+- **The status-bar icon is lit while anything is running**, and its tooltip
+  names what.
 - **Services survive a crash of the app.** Anything still running is taken back
   over at launch instead of being reported as stopped, so you do not start it
   twice. Only on proof: the process holding the port has to be running the exact
