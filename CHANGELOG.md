@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.15
+
+- **One tick per row, meaning the same thing everywhere.** It says what **Start
+  all** brings up. On a web server it is also exclusive - the ticked one is the
+  one your project URLs point at - so **Use this** and the `default` pill are
+  gone, because two controls saying the same thing are two controls to keep in
+  agreement. Unticking the serving web server does nothing: nginx and Apache
+  cannot both hold port 80, so there is no state where neither is chosen.
+
+- **The scheduler stays off until you ask for it.** It fires jobs - a queue
+  worker, a backup, a deploy - so a scheduler that comes up because you pressed
+  **Start all** is exactly the one that surprises you at 3am. Every other
+  service defaults to on, because a server sitting on a port waiting to be asked
+  something is harmless to have running. Tick Cron and it joins the rest.
+
 ## 0.1.14
 
 - **Start all starts what you tick.** MySQL and PostgreSQL run side by side

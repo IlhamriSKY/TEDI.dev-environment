@@ -32,10 +32,11 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
   that folder, so `php`, `node`, `npm` and `composer` in it are that project's
   versions. Needs TEDI 0.4.47 or newer; on an older one the button is simply
   not there.
-- **Nginx and Apache, one at a time.** Both get installed, **Use this** picks
-  which one your project URLs point at, and starting either stops the other — so
-  there is only ever one server on the ports you configured and one set of rules
-  answering. Each keeps its own virtual hosts, so switching is a click.
+- **Nginx and Apache, one at a time.** Both get installed, and the tick on the
+  row picks which one your project URLs point at. Starting either stops the
+  other, so there is only ever one server on the ports you configured and one
+  set of rules answering. Each keeps its own virtual hosts, so switching is a
+  click.
 - **Every service can install another version**, from its own row: the same
   dropdown-and-Install pair the runtimes have. Nginx, Apache, MySQL, PostgreSQL
   and Redis are versioned downloads like PHP and Node.
@@ -49,7 +50,8 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
 - **Start all starts what you tick.** Two databases run side by side happily,
   and most people want one, so each service row carries a tick that decides
   whether **Start all** includes it. Its own Start button always works either
-  way.
+  way. Cron is the one that starts off: it fires jobs, and a scheduler that
+  comes up because you pressed Start all is the one that surprises you.
 - **Databases as services.** MySQL, PostgreSQL and Redis start, stop and
   initialise their data directories from the dashboard.
 - **The databases show up in SQL Explorer by themselves.** Install MySQL or

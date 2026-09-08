@@ -618,14 +618,29 @@ test("Start all includes a service until it is unticked", () => {
   setConfig({ autostart: { mysql: false } });
   assert.equal(startsWithAll("mysql"), false, "an unticked service must be skipped");
   assert.equal(startsWithAll("postgres"), true, "unticking one must not affect another");
-
-  // `true` is never written, but reading one must not flip the answer.
-  setConfig({ autostart: { mysql: true } });
-  assert.equal(startsWithAll("mysql"), true);
   setConfig({ autostart: {} });
 });
 
-test("Start all actually consults it, and the web servers are left out of it", () => {
+test("the scheduler is the one that stays off until it is asked for", () => {
+  // It fires jobs - a queue worker, a backup, a deploy - so a scheduler that
+  // comes up because you pressed "Start all" is the one that surprises you at
+  // 3am. Every other service is a server sitting on a port waiting to be asked
+  // something, which is harmless to have running.
+  setConfig({ autostart: {} });
+  assert.equal(startsWithAll("cron"), false, "the scheduler must default to OFF");
+  for (const id of ["mysql", "postgres", "redis"]) {
+    assert.equal(startsWithAll(id), true, `${id} must default to ON`);
+  }
+
+  // Ticking it stores the departure; unticking it again stores nothing, so the
+  // record stays the set of deliberate exceptions rather than a copy of every
+  // service.
+  setConfig({ autostart: { cron: true } });
+  assert.equal(startsWithAll("cron"), true, "ticking the scheduler must include it");
+  setConfig({ autostart: {} });
+});
+
+test("Start all consults the tick, and a web server's tick is which one", () => {
   const src = readFileSync(new URL("./manager/services.js", import.meta.url), "utf8");
   const at = src.indexOf("export async function startAll");
   assert.ok(at > 0, "startAll is gone");
@@ -634,14 +649,27 @@ test("Start all actually consults it, and the web servers are left out of it", (
     "startAll no longer checks the tick, so it starts every installed database again",
   );
 
-  // A web server row must NOT offer one: which of those comes up is `webServer`,
-  // chosen with "Use this", and two controls that can disagree would make
-  // "Start all" answerable two ways.
+  // A web server's tick is exclusive and writes `webServer`, not `autostart`:
+  // nginx and apache cannot both hold port 80, so there is no state where
+  // neither is chosen, and unticking the ticked one has to be a no-op.
   const view = readFileSync(new URL("./ui/services-view.js", import.meta.url), "utf8");
+  const tick = view.slice(view.indexOf("function rowTick("));
+  assert.ok(tick.length > 0, "the row tick is gone");
   assert.match(
-    view,
-    /inProcess \|\| isWebServer\(id\) \? null : autostartBox\(/,
-    "the tick must not appear on a web server row",
+    tick,
+    /if \(web && on\) return;/,
+    "unticking the serving web server would leave the projects with no server at all",
+  );
+  assert.match(
+    tick,
+    /if \(web\) await useWebServer\(/,
+    "a web server's tick must hand over, not write autostart",
+  );
+  // And the button that used to say the same thing is gone, rather than left to
+  // be kept in agreement with it.
+  assert.ok(
+    !view.includes('button("Use this"'),
+    "two controls now say which web server serves, and they can disagree",
   );
 });
 

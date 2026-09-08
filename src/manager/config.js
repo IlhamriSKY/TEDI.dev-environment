@@ -124,32 +124,45 @@ async function saveConfig() {
 }
 
 /**
+ * What "Start all" leaves alone unless it is asked.
+ *
+ * Only the scheduler. It fires jobs - `php artisan queue:work`, a backup, a
+ * deploy - and a scheduler that comes up because you pressed "Start all" is
+ * exactly the scheduler that surprises you at 3am. Everything else is a server
+ * sitting on a port waiting to be asked something, which is harmless to have
+ * running.
+ */
+const OFF_BY_DEFAULT = new Set(["cron"]);
+
+/**
  * Does "Start all" bring this service up?
  *
- * Absent means yes. The alternative - storing `true` for everything at install
- * time - makes the answer depend on WHEN a service was installed, and would
- * silently exclude anything added by a release that did not know to write it.
+ * The stored record holds only DEPARTURES from the default, never a copy of
+ * every service: storing the answer for everything at install time makes it
+ * depend on WHEN a service was installed, and silently excludes anything a
+ * later release adds without knowing to write it.
  *
  * @param {string} id @returns {boolean}
  */
 export function startsWithAll(id) {
-  return config.autostart[id] !== false;
+  const stored = config.autostart[id];
+  if (stored !== undefined) return stored;
+  return !OFF_BY_DEFAULT.has(id);
 }
 
 /**
  * Include or exclude a service from "Start all".
  *
- * The web servers are not asked: which of those comes up is `webServer`, chosen
- * with "Use this", and a second control that could disagree with it would make
- * "Start all" answerable two ways. Everything else is a genuine choice - two
- * databases can run side by side and most people want one.
+ * The web servers do not come through here. Their tick is `webServer` - the one
+ * that is ticked is the one the project URLs point at - and it is exclusive,
+ * because two servers cannot both hold port 80.
  *
  * @param {string} id @param {boolean} on @returns {Promise<void>}
  */
 export async function setStartsWithAll(id, on) {
   const next = { ...config.autostart };
-  if (on) delete next[id];
-  else next[id] = false;
+  if (on === !OFF_BY_DEFAULT.has(id)) delete next[id];
+  else next[id] = on;
   setConfig({ autostart: next });
   await saveConfig();
 }

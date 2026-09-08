@@ -147,8 +147,8 @@ async function useWebServer(id, refresh) {
   // `hosts: false`. Which server serves is not something the hosts file
   // records - it holds project domains pointed at 127.0.0.1, and both servers
   // answer on the same address. Publishing WITH the sync meant switching from
-  // Apache to nginx could raise an administrator prompt, which is a
-  // frightening thing to be asked for pressing "Use this".
+  // Apache to nginx could raise an administrator prompt, which is a frightening
+  // thing to be asked for ticking a box.
   await publish({ hosts: false }).catch(() => {});
   if (wasRunning) {
     const s = await start(id);
@@ -168,23 +168,41 @@ async function useWebServer(id, refresh) {
  *
  * @param {string} id @param {() => void} refresh @returns {HTMLElement}
  */
-function autostartBox(id, refresh) {
-  const on = startsWithAll(id);
+function rowTick(id, refresh) {
+  const web = isWebServer(id);
+  // A web server's tick is which one, not whether: nginx and apache cannot both
+  // hold port 80, so ticking one unticks the other and there is no state where
+  // neither is chosen. Everything else is an independent yes or no.
+  const on = web ? id === config.webServer : startsWithAll(id);
+
   const box = checkbox(on);
   box.addEventListener("click", async () => {
-    await setStartsWithAll(id, !on);
-    refresh();
+    // Already the default. Unticking it would leave no web server at all, which
+    // is not a state the projects can be served from.
+    if (web && on) return;
+    if (web) await useWebServer(id, refresh);
+    else {
+      await setStartsWithAll(id, !on);
+      refresh();
+    }
   });
+
+  const title = web
+    ? on
+      ? "The project URLs point here, and Start all brings this one up. Tick the other to switch."
+      : "Point the project URLs at this server and start it instead. Only one runs at a time, so a running default is handed over."
+    : on
+      ? "Start all brings this up. Untick to leave it out."
+      : "Start all skips this. Its own Start button still works.";
+
   // Wrapped rather than titled directly: `h` is what routes a `title` through
   // the pane's own tooltip, and `checkbox` builds its node itself.
   return h(
     "label",
     {
-      title: on
-        ? "Start all brings this up. Untick to leave it out."
-        : "Start all skips this. Its own Start button still works.",
-      style: "display:inline-flex;align-items:center;flex:none;cursor:pointer",
-      attrs: { "aria-label": `Start all includes ${id}` },
+      title,
+      style: `display:inline-flex;align-items:center;flex:none;cursor:${web && on ? "default" : "pointer"}`,
+      attrs: { "aria-label": web ? `Serve with ${id}` : `Start all includes ${id}` },
     },
     [box],
   );
@@ -410,10 +428,10 @@ function serviceRow(id, refresh) {
     "div",
     { style: "display:flex;align-items:center;gap:8px;min-width:170px;flex:none" },
     [
-      // Whether "Start all" brings this one up. Not offered for the web
-      // servers: which of those comes up is "Use this", and a second control
-      // that could disagree with it would make "Start all" answerable two ways.
-      inProcess || isWebServer(id) ? null : autostartBox(id, refresh),
+      // One tick per row, meaning the same thing everywhere: this is what
+      // "Start all" brings up. On a web server it is exclusive, because the
+      // ticked one is also the one the project URLs point at.
+      rowTick(id, refresh),
       mark(logo),
       h("div", { style: "display:flex;flex-direction:column;gap:0;min-width:0" }, [
         h("span", {
@@ -454,20 +472,9 @@ function serviceRow(id, refresh) {
       // What the scheduler is actually carrying, which is the only thing about
       // it worth a glance: how many jobs, and whether any is running now.
       inProcess ? pill(jobSummary()) : null,
-      // Which web server the projects' URLs point at, and therefore which one
-      // "Start all" brings up. Only worth saying when the other is installed
-      // too, because only then is a choice being made.
-      isWebServer(id) && installedOf(id === "nginx" ? "apache" : "nginx").length > 0
-        ? id === config.webServer
-          ? pill("default", {
-              icon: "lucide:CircleCheck",
-              title: "Your project URLs point at this one, and Start all brings it up.",
-            })
-          : button("Use this", () => void useWebServer(id, refresh), {
-              title:
-                "Point the project URLs at this server. Only one runs at a time, so a running default is handed over.",
-            })
-        : null,
+      // The tick on the left says which web server serves; a second control
+      // saying the same thing was one to keep in agreement for nothing.
+
       failed && st?.error
         ? h("span", {
             text: st.error,
