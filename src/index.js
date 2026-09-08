@@ -118,6 +118,13 @@ export async function activate(context) {
     // Once: which optional extensions are alongside us. A service row renders
     // synchronously and cannot await a directory probe.
     await probeViewer();
+    // Republish, which is how the environment repairs itself at launch: a vhost
+    // that was never written, a certificate that was never issued, a hosts file
+    // that lost its block. `applyHosts` returns early when nothing is missing,
+    // so the ordinary launch asks for nothing and shows no prompt - the
+    // administrator prompt appears only when there is genuinely something to
+    // put back, which is exactly when it is worth being asked.
+    await publish().catch((err) => warn("could not republish at startup", err));
     // Anything still running from before a crash is taken back over rather than
     // reported as stopped and then failing to start on its own port.
     const recovered = await recoverRunning();

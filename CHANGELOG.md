@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.26
+
+- **The hosts file could be emptied, and was.** Nothing resolved - not
+  `phpmyadmin.test`, not any project - because the file had been written to zero
+  bytes. Three things lined up: `applyHosts` read it TWICE and checked "could I
+  read it" only on the first, so a failed second read rendered a file containing
+  nothing but this extension's own block and the machine's own entries went with
+  it; then, with nothing left around the block and no domains to put in it, the
+  render was a single newline; and a PowerShell here-string turns a single
+  newline into the empty string, which `Set-Content -NoNewline` writes as no
+  bytes at all.
+
+  One read now, checked once, and a guard that refuses any write which would
+  leave the file blank or drop the lines around our block. That guard is the
+  part that matters: the elevated writer replaces the file wholesale, so
+  anything wrong upstream of it arrives as deletion.
+
+- **The environment repairs itself at launch.** A vhost that was never written,
+  a certificate that was never issued, a hosts file missing its block: all of it
+  is republished when the pane starts. Nothing is missing on an ordinary launch,
+  so nothing is asked and no prompt appears - the administrator prompt shows up
+  only when there is genuinely something to put back.
+
 ## 0.1.25
 
 - **Checking for versions stays on the button that asked.** Pressing Install

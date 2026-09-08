@@ -13,7 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, readFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { renderHosts, MARKERS } from "./web/hosts.js";
+import { renderHosts, MARKERS, wouldLose } from "./web/hosts.js";
 import { SHIMS, windowsShim, posixShim } from "./project/shims.js";
 import { plan } from "./core/archive.js";
 import { setCtx, setConfig, state } from "./runtime.js";
@@ -604,6 +604,52 @@ test("every Remove asks first", () => {
     );
     assert.ok(before.includes("if (!ok) return;"), `${file}: ${call} ignores the answer`);
   }
+});
+
+console.log("\nthe hosts file is never emptied");
+
+// This one actually happened, and it broke name resolution for every project on
+// the machine: the file was left at ZERO bytes and nothing resolved. The chain
+// was `renderHosts` returning a lone newline, a PowerShell here-string turning
+// that into the empty string, and `Set-Content -NoNewline` writing nothing.
+// Upstream of it, `applyHosts` read the file twice and checked `readable` only
+// on the first, so a failed second read rendered a file containing nothing but
+// our own block - which is how the machine's original entries went first.
+
+test("a render that would empty the file is refused", () => {
+  const eol = "\r\n";
+  // Nothing around our block, and nothing left to put in it. Correct as a
+  // render, fatal as a write.
+  const emptied = renderHosts({ before: "", after: "" }, [], eol);
+  assert.ok(!emptied.trim(), "this is the render that produced a zero-byte hosts file");
+  assert.ok(wouldLose({ before: "", after: "" }, emptied), "an empty write must be refused");
+
+  // And the one that silently dropped the machine's own entries.
+  const theirs = "# Copyright (c) 1993-2009 Microsoft Corp.\r\n127.0.0.1 something.local";
+  assert.ok(
+    wouldLose(
+      { before: theirs, after: "" },
+      renderHosts({ before: "", after: "" }, ["a.test"], eol),
+    ),
+    "a write that loses the lines above our block must be refused",
+  );
+});
+
+test("an ordinary write is not refused", () => {
+  const eol = "\r\n";
+  const before = "# Copyright (c) 1993-2009 Microsoft Corp.\r\n127.0.0.1 something.local";
+  const parts = { before, after: "" };
+  const content = renderHosts(parts, ["a.test", "b.test"], eol);
+  assert.equal(wouldLose(parts, content), null, "a normal write must go through");
+  assert.ok(content.includes(before), "their lines survive");
+  assert.ok(content.includes("a.test") && content.includes("b.test"));
+
+  // Removing the last project legitimately drops the block, and that is a write
+  // worth making as long as something is left.
+  const cleared = renderHosts(parts, [], eol);
+  assert.equal(wouldLose(parts, cleared), null);
+  assert.ok(!cleared.includes("a.test"), "the block goes");
+  assert.ok(cleared.includes(before), "their lines stay");
 });
 
 console.log("\nthe Apache index");

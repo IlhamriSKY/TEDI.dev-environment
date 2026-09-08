@@ -19,7 +19,7 @@
 import { hostsFile } from "../core/paths.js";
 import { readText } from "../core/fsx.js";
 import { elevate } from "../core/elevate.js";
-import { isWindows } from "../runtime.js";
+import { isWindows, warn } from "../runtime.js";
 
 const BEGIN = "# >>> tedi.devenv >>>";
 const END = "# <<< tedi.devenv <<<";
@@ -56,21 +56,6 @@ async function readHosts() {
     domains,
     readable: true,
   };
-}
-
-/**
- * What is missing and what is stale, without changing anything.
- *
- * @param {string[]} wanted
- * @returns {Promise<{ missing: string[], extra: string[], inSync: boolean, readable: boolean }>}
- */
-async function diffHosts(wanted) {
-  const { domains, readable } = await readHosts();
-  const have = new Set(domains);
-  const want = new Set(wanted);
-  const missing = wanted.filter((d) => !have.has(d));
-  const extra = domains.filter((d) => !want.has(d));
-  return { missing, extra, inSync: missing.length === 0 && extra.length === 0, readable };
 }
 
 /**
@@ -113,15 +98,31 @@ export function renderHosts(parts, wanted, eol) {
  * @returns {Promise<{ ok: boolean, changed: boolean, message?: string }>}
  */
 export async function applyHosts(wanted) {
-  const diff = await diffHosts(wanted);
-  if (!diff.readable) {
+  // ONE read, and it is the one every decision below is made from.
+  //
+  // This read the file TWICE - once to diff, once to render - and checked
+  // `readable` only on the first. A second read that failed returned empty
+  // `before` and `after`, which render as a hosts file containing nothing but
+  // our block, and the user's own entries were gone. Every later publish then
+  // worked from that truncated file, so the damage compounded quietly.
+  const parts = await readHosts();
+  if (!parts.readable) {
     return { ok: false, changed: false, message: "The hosts file could not be read." };
   }
-  if (diff.inSync) return { ok: true, changed: false };
 
-  const parts = await readHosts();
+  const have = new Set(parts.domains);
+  const want = new Set(wanted);
+  const inSync = wanted.every((d) => have.has(d)) && parts.domains.every((d) => want.has(d));
+  if (inSync) return { ok: true, changed: false };
+
   const eol = isWindows() ? "\r\n" : "\n";
   const content = renderHosts(parts, wanted, eol);
+
+  const refusal = wouldLose(parts, content);
+  if (refusal) {
+    warn("refusing to write the hosts file:", refusal);
+    return { ok: false, changed: false, message: refusal };
+  }
 
   const result = await elevate(writeScript(content), {
     description: "TEDI Dev Environment needs to update your hosts file",
@@ -130,6 +131,38 @@ export async function applyHosts(wanted) {
     return { ok: false, changed: false, message: result.message };
   }
   return { ok: true, changed: true };
+}
+
+/**
+ * Why this content must not be written, or `null`.
+ *
+ * The last line of defence on the one file here whose failure mode is breaking
+ * name resolution for a whole machine. Everything above can be correct and this
+ * still earns its place: the elevated writer replaces the file wholesale, so
+ * anything wrong upstream arrives as deletion.
+ *
+ * Blank is refused outright. A hosts file with no bytes in it is never what
+ * anyone meant - it is what a lone newline becomes after a PowerShell
+ * here-string, which is exactly how this file reached zero bytes - and if there
+ * is genuinely nothing left to write, leaving the previous file alone is the
+ * better answer than emptying it.
+ *
+ * @param {{ before: string, after: string }} parts
+ * @param {string} content
+ * Exported for the self-check: it is the guard whose absence emptied a real
+ * machine's hosts file, so it is the one thing here worth pinning.
+ *
+ * @returns {string | null}
+ */
+export function wouldLose(parts, content) {
+  if (!content.trim()) return "it would leave the hosts file empty";
+  if (parts.before && !content.includes(parts.before)) {
+    return "it would drop the lines above this extension's block";
+  }
+  if (parts.after && !content.includes(parts.after)) {
+    return "it would drop the lines below this extension's block";
+  }
+  return null;
 }
 
 /**
