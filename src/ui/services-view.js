@@ -66,7 +66,7 @@ import {
 } from "../tools/phpmyadmin.js";
 import { openFolder } from "../core/proc.js";
 import { applyRuntimeChange } from "../manager/apply.js";
-import { state, config, ctx } from "../runtime.js";
+import { state, config, ctx, loudBusy } from "../runtime.js";
 
 /**
  * @param {() => void} refresh
@@ -576,6 +576,8 @@ function serviceRow(id, refresh) {
   // their progress, and without it "Install everything" pulling nginx showed
   // nothing anywhere once the setup gate was down.
   const busy = state.busy.get(id);
+  // What the ROW says. A version check is the button's business.
+  const loud = loudBusy(id);
   // An in-process service has nothing on disk, so it counts as always present:
   // the version pill, the "not installed" caption and the disabled Start button
   // are all questions about a binary it does not have.
@@ -605,11 +607,11 @@ function serviceRow(id, refresh) {
         }),
         h("span", { style: "display:flex;align-items:center;gap:5px" }, [
           status(
-            busy ? "working" : running ? "ok" : failed ? "error" : starting ? "working" : "idle",
+            loud ? "working" : running ? "ok" : failed ? "error" : starting ? "working" : "idle",
           ),
           muted(
-            busy
-              ? `${busy.text}${busy.pct === undefined ? "" : ` ${busy.pct}%`}`
+            loud
+              ? `${loud.text}${loud.pct === undefined ? "" : ` ${loud.pct}%`}`
               : present
                 ? stateLabel
                 : "not installed",
@@ -654,7 +656,9 @@ function serviceRow(id, refresh) {
   );
 
   // Nothing to press while its own archive is still coming down.
-  const disabled = !present || Boolean(busy);
+  // Stop stays Stop while a version list is being fetched: the two have
+  // nothing to do with each other, and greying it out said otherwise.
+  const disabled = !present || Boolean(loud);
   const right = h("div", { style: "display:flex;align-items:center;gap:5px;flex:none" }, [
     // The scheduler's contents open FROM its row, like php.ini opens from the
     // PHP row: a list you go and work on rather than a state you watch, and one
@@ -741,9 +745,9 @@ function serviceRow(id, refresh) {
   // Same shape the setup checklist and the runtime rows use: the bar belongs to
   // the row doing the work, so nothing has to say which one it is measuring. A
   // `quiet` step has no transfer behind it and spins the Install icon instead.
-  if (!busy || busy.quiet) return line;
+  if (!loud) return line;
   return h("div", { style: "display:flex;flex-direction:column;min-width:0" }, [
     line,
-    progress(busy.pct),
+    progress(loud.pct),
   ]);
 }

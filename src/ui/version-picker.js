@@ -54,7 +54,7 @@ export async function openInstaller(p, refresh) {
       ctx?.ui.toast(
         p.packageHint
           ? `No ${p.label} download exists for this platform. Install it with: ${p.packageHint}`
-          : `No ${p.label} versions are available right now.`,
+          : `No ${p.label} versions came back. The site it publishes to may be unreachable - it is asked again on the next press.`,
         { variant: "warning" },
       );
       return;

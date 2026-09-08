@@ -214,6 +214,22 @@ export function statusSignature() {
 }
 
 /**
+ * What a component is doing, when it is worth saying on its row.
+ *
+ * A `quiet` step is one with no transfer behind it - fetching a version list -
+ * and it belongs to the BUTTON that started it, not to the component. Reported
+ * on the row it replaced the state you were reading ("running" became "Checking
+ * available versions"), greyed out the Stop button beside it, and made a
+ * two-second metadata request look like the service had gone away.
+ *
+ * @param {string} id @returns {BusyState | undefined}
+ */
+export function loudBusy(id) {
+  const busy = state.busy.get(id);
+  return busy && !busy.quiet ? busy : undefined;
+}
+
+/**
  * Record what a component is doing, or that it has finished.
  *
  * A funnel rather than nine `state.busy.set` calls, because anything watching

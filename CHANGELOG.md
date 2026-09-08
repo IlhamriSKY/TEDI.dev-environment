@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.25
+
+- **Checking for versions stays on the button that asked.** Pressing Install
+  replaced the row's state - "running" became "Checking available versions" -
+  greyed out the Stop button beside it, and breathed the setup checklist, all
+  for a metadata request that takes a second. Stop stays Stop, the row keeps
+  saying what the service is doing, and only the Install icon spins. Same in
+  Runtimes, so **Install everything** no longer reports a version lookup as
+  progress on a component.
+
+- **A failed Apache Lounge lookup is no longer cached.** An empty `Map` is
+  truthy, so one unreachable moment left the version list empty for the rest of
+  the session and only a restart brought it back. It is asked again on the next
+  press, and the message says the site may be unreachable rather than implying
+  there is nothing to install.
+
+  Worth stating: Apache Lounge publishes only the CURRENT build on that page, so
+  one or two versions is the honest answer for Apache even when everything
+  works - unlike PHP, Node or nginx, which list their whole history.
+
 ## 0.1.24
 
 - **The settings rows lay out properly.** Text is the only thing in a row that

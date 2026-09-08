@@ -606,6 +606,43 @@ test("every Remove asks first", () => {
   }
 });
 
+console.log("\nthe Apache index");
+
+// Apache Lounge publishes only the CURRENT build per compiler on its download
+// page, so one or two versions is the honest answer even when everything works.
+// Zero is not, and zero is what a cached failure produced for the rest of a
+// session - an empty Map is truthy, so `if (loungeIndex)` returned it forever.
+
+test("a failed lookup is not cached, an empty Map being truthy", () => {
+  const src = readFileSync(new URL("./registry/servers.js", import.meta.url), "utf8");
+  assert.match(
+    src,
+    /if \(loungeIndex\?\.size\) return loungeIndex;/,
+    "a failed Apache Lounge fetch is cached again, hiding every build until restart",
+  );
+});
+
+test("the index parses the page's own link shape", () => {
+  // Captured from apachelounge.com/download/, which is the only source for
+  // these builds and states them in exactly this form.
+  const html = [
+    '<a href="/download/VS18/binaries/httpd-2.4.68-260827-Win64-VS18.zip">httpd 2.4.68</a>',
+    '<a href="VS17/binaries/httpd-2.4.63-240918-win64-VS17.zip">httpd 2.4.63</a>',
+    '<a href="/download/VS18/binaries/httpd-2.4.68-260827-Win64-VS18.zip.asc">signature</a>',
+  ].join("\n");
+  const index = parseLoungeIndex(html);
+  assert.deepEqual([...index.keys()].sort(), ["2.4.63", "2.4.68"]);
+  assert.ok(
+    index.get("2.4.68")?.startsWith("https://www.apachelounge.com/download/VS18/"),
+    "a root-relative href must not be prefixed twice",
+  );
+  assert.ok(
+    index.get("2.4.63")?.startsWith("https://www.apachelounge.com/download/VS17/"),
+    "a page-relative href must be given the /download/ prefix",
+  );
+  assert.equal(parseLoungeIndex("").size, 0, "an empty page must yield no versions");
+});
+
 console.log("\nMySQL accounts");
 
 // Two things here can be wrong without anything failing: what comes back from
@@ -968,9 +1005,13 @@ test("one loading glyph, named once", () => {
 });
 
 test("every row that can be busy draws the working state", () => {
+  // `loud`, not `busy`: a version check belongs to the button that started it,
+  // so the ROW keeps showing the state you were reading. Asserting on `busy`
+  // here would lock in the behaviour that made "running" flicker to "Checking
+  // available versions" on every press of Install.
   const sites = [
-    ["ui/runtimes-view.js", 'status(busy ? "working"'],
-    ["ui/services-view.js", 'busy ? "working"'],
+    ["ui/runtimes-view.js", 'status(loud ? "working"'],
+    ["ui/services-view.js", 'loud ? "working"'],
     ["ui/dashboard.js", 'status(step.working ? "working"'],
   ];
   for (const [file, needle] of sites) {

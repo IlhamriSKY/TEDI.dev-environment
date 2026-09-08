@@ -325,7 +325,10 @@ async function setupSteps(refresh) {
   // component id and only one install runs at a time, so the first entry is the
   // one in flight. While the gate is up this is the ONLY progress on screen,
   // because the Runtimes rows that normally carry it are behind the gate.
-  const [busyId, busyState] = [...state.busy.entries()][0] ?? [];
+  // Only work with something behind it. A version list being fetched is not
+  // a step in progress, and reporting it as one made the checklist breathe
+  // for every press of Install.
+  const [busyId, busyState] = [...state.busy.entries()].find(([, b]) => !b.quiet) ?? [];
   const busy = busyState
     ? [
         `${provider(busyId ?? "")?.label ?? busyId}: ${busyState.text}`,

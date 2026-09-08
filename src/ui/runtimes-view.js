@@ -19,7 +19,7 @@ import { applyRuntimeChange } from "../manager/apply.js";
 import { installable } from "../manager/defaults.js";
 import { installEverything } from "./install-all.js";
 import { openInstaller } from "./version-picker.js";
-import { state } from "../runtime.js";
+import { state, loudBusy } from "../runtime.js";
 
 /** @typedef {import("../registry/index.js").Provider} Provider */
 
@@ -77,6 +77,9 @@ function runtimeRow(p, refresh) {
   const installed = installedOf(p.id);
   const active = activeVersion(p.id) ?? installed[0]?.version ?? null;
   const busy = state.busy.get(p.id);
+  // See `services-view`: a version check belongs to its button, not to the
+  // component, and that includes the rows under Install everything.
+  const loud = loudBusy(p.id);
   const logo = markFor(p.id);
 
   const left = h(
@@ -91,10 +94,10 @@ function runtimeRow(p, refresh) {
         // there said the same thing in the same place with only the words
         // differing - and the words are what you read last.
         h("span", { style: "display:flex;align-items:center;gap:5px" }, [
-          status(busy ? "working" : installed.length ? "ok" : "idle"),
+          status(loud ? "working" : installed.length ? "ok" : "idle"),
           muted(
-            busy
-              ? `${busy.text}${busy.pct === undefined ? "" : ` ${busy.pct}%`}`
+            loud
+              ? `${loud.text}${loud.pct === undefined ? "" : ` ${loud.pct}%`}`
               : installed.length
                 ? `${installed.length} installed`
                 : "not installed",
@@ -180,9 +183,9 @@ function runtimeRow(p, refresh) {
   // Same shape the setup checklist uses: the bar belongs to the row doing the
   // work, so nothing has to say which component it is measuring. A `quiet` step
   // has no transfer behind it and says so on the Install button instead.
-  if (!busy || busy.quiet) return line;
+  if (!loud) return line;
   return h("div", { style: "display:flex;flex-direction:column;min-width:0" }, [
     line,
-    progress(busy.pct),
+    progress(loud.pct),
   ]);
 }

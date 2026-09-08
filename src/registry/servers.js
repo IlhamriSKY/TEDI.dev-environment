@@ -120,15 +120,18 @@ export function parseLoungeIndex(html) {
 
 /** @returns {Promise<Map<string, string>>} */
 async function apacheIndex() {
-  if (loungeIndex) return loungeIndex;
-  let map = new Map();
+  // A FAILED fetch is not an answer worth keeping. `if (loungeIndex)` was true
+  // for the empty map a failure left behind - an empty Map is truthy - so one
+  // unreachable moment hid every Apache build for the rest of the session, and
+  // the only cure was restarting the app. Only a map with something in it is
+  // cached; an empty one is asked again next time.
+  if (loungeIndex?.size) return loungeIndex;
   try {
-    map = parseLoungeIndex(await fetchText(LOUNGE_PAGE, { timeoutMs: 30_000 }));
+    loungeIndex = parseLoungeIndex(await fetchText(LOUNGE_PAGE, { timeoutMs: 30_000 }));
   } catch {
-    /* leave the map empty; callers treat that as "no builds found" */
+    loungeIndex = new Map();
   }
-  loungeIndex = map;
-  return map;
+  return loungeIndex;
 }
 
 /** @returns {Promise<VersionInfo[]>} */
