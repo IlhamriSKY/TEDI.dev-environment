@@ -67,12 +67,21 @@ export async function publish(opts = {}) {
     hostsMessage = res.message;
   }
 
-  // Only a server that is already up. Starting one here would mean adding a
-  // project silently starts listening on port 80, which is not what "add a
-  // project" asked for.
-  const status = state.services.get(config.webServer);
-  const restarted = status?.state === "running";
-  if (restarted) await restart(config.webServer);
+  // Whichever server is actually UP, not whichever one is configured.
+  //
+  // Those are not always the same: `recoverRunning` adopts a web server it finds
+  // still running after a crash whatever `webServer` says, and a user can start
+  // the other one from its own row. Reloading the configured one meant
+  // regenerating every vhost and then reloading a server that was not running,
+  // while the one answering on port 80 kept serving a config from before the
+  // change - which reads as a new site resolving to an old one.
+  //
+  // Only a server already up: starting one here would mean adding a project
+  // silently begins listening on port 80, which is not what "add a project"
+  // asked for.
+  const live = WEB_SERVERS.find((id) => state.services.get(id)?.state === "running") ?? null;
+  const restarted = live !== null;
+  if (live) await restart(live);
 
   return { domains, hostsOk, hostsMessage, restarted };
 }

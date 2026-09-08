@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.27
+
+- **A new site resolved to an old one.** `phpmyadmin.test` served the first
+  project instead of phpMyAdmin, because every vhost was regenerated and then
+  the **configured** web server was reloaded - which was not the one answering
+  on port 80. Those two are not always the same: recovery adopts whichever
+  server it finds still running whatever the setting says, and either can be
+  started from its own row. A server that is never reloaded keeps serving the
+  config it started with, so a domain it has never heard of falls through to
+  whichever vhost happens to be first. Publishing reloads whatever is up.
+
+- **Recovery runs before the startup republish.** The republish added in 0.1.26
+  ran first, which meant it regenerated every config and then found nothing
+  running to reload - the exact failure above, on every launch. Recovery puts
+  the running server on the books, and the republish then reaches it.
+
 ## 0.1.26
 
 - **The hosts file could be emptied, and was.** Nothing resolved - not

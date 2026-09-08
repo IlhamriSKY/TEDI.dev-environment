@@ -606,6 +606,41 @@ test("every Remove asks first", () => {
   }
 });
 
+console.log("\npublishing reaches the server that is running");
+
+// A new site resolved to an old one: every vhost was regenerated and then the
+// CONFIGURED web server was reloaded, which was not the one answering on port
+// 80. Those two are not always the same - recovery adopts whichever server it
+// finds still running, whatever the setting says, and either can be started
+// from its own row.
+
+test("publish reloads whatever is up, not whatever is configured", () => {
+  const src = readFileSync(new URL("./web/publish.js", import.meta.url), "utf8");
+  assert.match(
+    src,
+    /WEB_SERVERS\.find\(\(id\) => state\.services\.get\(id\)\?\.state === "running"\)/,
+    "publish picks the server to reload by configuration again, so the running one keeps a stale config",
+  );
+  assert.ok(
+    !/restart\(config\.webServer\)/.test(src),
+    "publish still reloads the configured server rather than the live one",
+  );
+});
+
+test("recovery runs before the republish, or the republish reloads nothing", () => {
+  // Ordering, and it is load-bearing: `publish` can only reload the running
+  // server once `recoverRunning` has put it in `state.services`.
+  const src = readFileSync(new URL("./index.js", import.meta.url), "utf8");
+  const recover = src.indexOf("await recoverRunning()");
+  const republish = src.indexOf("could not republish at startup");
+  assert.ok(recover > 0, "activation no longer recovers running services");
+  assert.ok(republish > 0, "activation no longer republishes");
+  assert.ok(
+    recover < republish,
+    "the startup republish runs before recovery, so it sees nothing running and reloads nothing",
+  );
+});
+
 console.log("\nthe hosts file is never emptied");
 
 // This one actually happened, and it broke name resolution for every project on

@@ -118,15 +118,13 @@ export async function activate(context) {
     // Once: which optional extensions are alongside us. A service row renders
     // synchronously and cannot await a directory probe.
     await probeViewer();
-    // Republish, which is how the environment repairs itself at launch: a vhost
-    // that was never written, a certificate that was never issued, a hosts file
-    // that lost its block. `applyHosts` returns early when nothing is missing,
-    // so the ordinary launch asks for nothing and shows no prompt - the
-    // administrator prompt appears only when there is genuinely something to
-    // put back, which is exactly when it is worth being asked.
-    await publish().catch((err) => warn("could not republish at startup", err));
     // Anything still running from before a crash is taken back over rather than
     // reported as stopped and then failing to start on its own port.
+    //
+    // BEFORE the republish, and that order is the whole point: `publish` reloads
+    // whichever web server is RUNNING, and it can only know that once recovery
+    // has said so. Republishing first regenerated every config and then reloaded
+    // nothing, leaving the server on port 80 serving the config it started with.
     const recovered = await recoverRunning();
     if (recovered > 0) {
       context.ui.toast(
@@ -134,6 +132,12 @@ export async function activate(context) {
         { variant: "info" },
       );
     }
+    // How the environment repairs itself at launch: a vhost that was never
+    // written, a certificate that was never issued, a hosts file that lost its
+    // block. `applyHosts` returns early when nothing is missing, so an ordinary
+    // launch asks for nothing and shows no prompt - the administrator prompt
+    // appears only when there is genuinely something to put back.
+    await publish().catch((err) => warn("could not republish at startup", err));
   } catch (err) {
     // Surfaced on the setup screen rather than swallowed, because the panel is
     // about to render a checklist and "root folder" is the step that fixes it.
