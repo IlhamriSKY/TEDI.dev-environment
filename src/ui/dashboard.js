@@ -169,6 +169,10 @@ function setupCard(steps, blocked) {
  * @property {string} icon
  * @property {boolean} [note]  A warning to read, not a step to finish: it never
  *                             blocks the panel and is never counted.
+ * @property {boolean} [working]  Something is running for this step right now.
+ *   Not derivable from `done`: an unfinished step and a step mid-download are
+ *   both `done: false`, and this checklist was the one place in the pane that
+ *   drew the same idle circle for both.
  * @property {boolean} [optional]  Still a step, still counted, but the panel
  *   opens without it. For a step whose answer is legitimately "no thanks".
  * @property {Node} [aside]    The control that completes it.
@@ -188,7 +192,7 @@ function setupCard(steps, blocked) {
  */
 function stepRow(step) {
   const line = row([
-    status(step.note ? "warn" : step.done ? "ok" : "idle"),
+    status(step.working ? "working" : step.note ? "warn" : step.done ? "ok" : "idle"),
     icon(step.icon, step.done ? "var(--primary)" : "var(--muted-foreground)"),
     h("div", { style: "display:flex;flex-direction:column;gap:1px;flex:1;min-width:0" }, [
       h("span", { style: "display:flex;align-items:center;gap:6px" }, [
@@ -389,6 +393,10 @@ async function setupSteps(refresh) {
       // prompt must not lock the panel forever - so a missing CA is an action
       // on this row rather than a step of its own or a reason to stay blocked.
       done: chosen && missing.length === 0,
+      // Anything installing belongs to this step: it is the only one that runs
+      // a download, and the per-component rows are not on screen while the
+      // checklist is the whole panel.
+      working: Boolean(busyState),
       detail:
         gated && busy
           ? busy

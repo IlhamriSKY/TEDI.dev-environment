@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.12
+
+- **One loading glyph, everywhere.** The pane had three ideas of "working" at
+  once: a breathing ring on a service row, a spinning Play triangle on the
+  button beside it, and a plain idle circle on the setup step that was actually
+  running the download. A rotating triangle is not a thing loading, it is a
+  thing gone wrong. A button now **swaps** its icon for the loading one rather
+  than spinning whatever it already has, it is the same `LoaderCircle` the row
+  next to it draws, and the Runtimes row - the one row type without a status
+  glyph at all - has one.
+
+- **A service says "starting" the moment it starts.** The state was only
+  reaching the screen on the next four-second poll, so a start sat there
+  claiming "stopped" for its whole duration while the button beside it already
+  showed a spinner. It repaints on a real state change now, and the Start button
+  holds its spinner across that repaint instead of snapping back to Play.
+
+- **A live check can skip.** Apache Lounge being unreachable is not this
+  extension being broken, and a check that cannot tell the difference gets
+  ignored the third time it goes red for a reason nobody here can fix. An empty
+  build list now asks whether the site answered at all before deciding which of
+  those it is saying.
+
 ## 0.1.11
 
 - **A terminal in any project, from its row.** TEDI's own terminal, opened in

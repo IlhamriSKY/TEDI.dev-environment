@@ -602,6 +602,60 @@ test("every Remove asks first", () => {
   }
 });
 
+console.log('\none way to say "working"');
+
+// The pane had THREE ideas of it at once: a breathing ring on a service row, a
+// spinning Play triangle on the button beside it, and a plain idle circle on the
+// setup step actually running the download. A rotating triangle is not a thing
+// loading, it is a thing gone wrong, and a checklist drawing "idle" over a live
+// download is just wrong. One glyph, named once, swapped in - asserted as source
+// text because none of it exists outside a DOM.
+
+test("one loading glyph, named once", () => {
+  const el = readFileSync(new URL("./ui/el.js", import.meta.url), "utf8");
+  assert.match(
+    el,
+    /const LOADING_ICON = "lucide:LoaderCircle"/,
+    "el.js no longer names the loading glyph in one place",
+  );
+  // A button SWAPS to it rather than spinning whatever icon it already has.
+  assert.ok(el.includes("const setLoading = (on) =>"), "button() no longer swaps its icon");
+  assert.ok(
+    el.includes("setLoading(true);"),
+    "nothing puts a button into its loading state while its handler runs",
+  );
+  // And no view invents a second one.
+  const views = [
+    "ui/runtimes-view.js",
+    "ui/services-view.js",
+    "ui/projects-view.js",
+    "ui/dashboard.js",
+    "ui/cron-view.js",
+    "ui/php-view.js",
+    "ui/version-picker.js",
+  ];
+  for (const file of views) {
+    const src = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+    assert.doesNotMatch(
+      src,
+      /lucide:(Loader|CircleDashed|RefreshCcw)/,
+      `${file} names a loading glyph of its own; use status("working")`,
+    );
+  }
+});
+
+test("every row that can be busy draws the working state", () => {
+  const sites = [
+    ["ui/runtimes-view.js", 'status(busy ? "working"'],
+    ["ui/services-view.js", 'busy ? "working"'],
+    ["ui/dashboard.js", 'status(step.working ? "working"'],
+  ];
+  for (const [file, needle] of sites) {
+    const src = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+    assert.ok(src.includes(needle), `${file} does not show a working state; it draws idle instead`);
+  }
+});
+
 console.log("\nthe version picker");
 
 test("a release date reads day-month-year, whatever the upstream sends", () => {

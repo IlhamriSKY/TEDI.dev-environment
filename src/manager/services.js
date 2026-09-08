@@ -15,7 +15,7 @@
 import { paths, join } from "../core/paths.js";
 import { exists, mkdirp, readDir, writeText } from "../core/fsx.js";
 import { spawn, kill, run, isAlive, sleep, logs } from "../core/proc.js";
-import { state, config, isWindows, exeSuffix, warn } from "../runtime.js";
+import { state, config, isWindows, exeSuffix, warn, repaint } from "../runtime.js";
 import { installedOf, resolveVersion } from "./versions.js";
 import { activeVersion } from "./config.js";
 import { fastcgiPort, generate } from "../web/vhost.js";
@@ -52,7 +52,18 @@ function statusOf(id) {
 /** @param {string} id @param {Partial<ServiceStatus>} patch */
 function setStatus(id, patch) {
   const s = statusOf(id);
+  const before = s.state;
   Object.assign(s, patch);
+  // A transition the user is standing there waiting for - "starting", then
+  // "running" or "error" - has to reach the screen when it happens, not on the
+  // next four-second tick. `start` deliberately waits 400ms to catch a process
+  // that dies immediately, so without this the row said "stopped" for the whole
+  // of a start while the button beside it was already showing a spinner.
+  //
+  // Only on a real change of `state`, which is what keeps the poll's own
+  // no-change ticks from repainting: `refreshStatuses` calls this for every
+  // service on every tick.
+  if (patch.state !== undefined && patch.state !== before) repaint();
   return s;
 }
 

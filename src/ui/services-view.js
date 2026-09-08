@@ -414,7 +414,12 @@ function serviceRow(id, refresh) {
             if (s.state === "error" && s.error) ctx?.ui.toast(s.error, { variant: "error" });
             refresh();
           },
-          { variant: "success", icon: "lucide:Play", disabled },
+          {
+            variant: "success",
+            icon: "lucide:Play",
+            disabled: disabled || starting,
+            spin: starting,
+          },
         ),
     running
       ? button(

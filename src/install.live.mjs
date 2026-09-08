@@ -234,8 +234,28 @@ async function step(name, fn) {
     await fn();
     console.log(`  ok    ${name}  (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
   } catch (err) {
+    // A third party being down is not this extension being broken, and a check
+    // that cannot tell the difference gets ignored the third time it goes red for
+    // a reason nobody here can fix. `Skip` is how a step says which one it is.
+    if (err instanceof Skip) {
+      console.log(`  skip  ${name}\n        ${err.message}`);
+      return;
+    }
     failed++;
     console.error(`  FAIL  ${name}\n        ${err?.message ?? err}`);
+  }
+}
+
+/** Thrown by a step whose PRECONDITION is unmet, rather than its assertion. */
+class Skip extends Error {}
+
+/** @param {string} url @returns {Promise<boolean>} */
+async function reachable(url) {
+  try {
+    const res = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(15_000) });
+    return res.ok || res.status === 405;
+  } catch {
+    return false;
   }
 }
 
@@ -419,7 +439,12 @@ if (process.platform === "win32") {
     const p = provider("apache");
     const versions = await p.versions();
     if (versions.length === 0) {
-      throw new Error("the Apache Lounge index listed no builds - has the page or the URL moved?");
+      // Empty means one of two very different things, and this used to assert
+      // the alarming one: the site is unreachable (nothing to do with us), or it
+      // answered and we parsed nothing out of it (our bug). So ask which.
+      const up = await reachable("https://www.apachelounge.com/download/");
+      if (!up) throw new Skip("apachelounge.com is unreachable; nothing to check against");
+      throw new Error("Apache Lounge answered but listed no builds - has the page changed?");
     }
     const target = (versions.find((v) => v.recommended) ?? versions[0]).version;
 

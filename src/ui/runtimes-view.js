@@ -7,7 +7,7 @@
 // that sometimes takes 200ms and sometimes takes four minutes trains people to
 // be afraid of it.
 
-import { h, row, muted, button, dropdown, section, mark, progress, confirm } from "./el.js";
+import { h, row, muted, button, dropdown, section, mark, progress, confirm, status } from "./el.js";
 import { openPhpConfig } from "./php-view.js";
 import { openPackagers } from "./packagers-view.js";
 import { markFor } from "./marks.js";
@@ -86,13 +86,20 @@ function runtimeRow(p, refresh) {
       mark(logo),
       h("div", { style: "display:flex;flex-direction:column;gap:0;min-width:0" }, [
         h("span", { text: p.label, style: "font-size:12px;font-weight:600;line-height:1.35" }),
-        muted(
-          busy
-            ? `${busy.text}${busy.pct === undefined ? "" : ` ${busy.pct}%`}`
-            : installed.length
-              ? `${installed.length} installed`
-              : "not installed",
-        ),
+        // The glyph every other row in this pane carries. Runtimes was the one
+        // row type without it, which meant a PHP mid-download and a PHP sitting
+        // there said the same thing in the same place with only the words
+        // differing - and the words are what you read last.
+        h("span", { style: "display:flex;align-items:center;gap:5px" }, [
+          status(busy ? "working" : installed.length ? "ok" : "idle"),
+          muted(
+            busy
+              ? `${busy.text}${busy.pct === undefined ? "" : ` ${busy.pct}%`}`
+              : installed.length
+                ? `${installed.length} installed`
+                : "not installed",
+          ),
+        ]),
       ]),
     ],
   );

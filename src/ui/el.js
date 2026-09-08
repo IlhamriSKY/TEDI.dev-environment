@@ -91,6 +91,17 @@ function spinAnimation() {
   return `tedi-dev-spin ${SPIN_MS}ms linear infinite -${Date.now() % SPIN_MS}ms`;
 }
 
+/** The loading glyph, or the caller's own. One name, so a button, a row and a
+ *  status line cannot each pick a different idea of what "working" looks like.
+ *  @param {boolean | undefined} on @param {string} own @returns {string} */
+function loading(on, own) {
+  return on ? LOADING_ICON : own;
+}
+
+/** What "working" looks like everywhere in this pane. `status("working")` draws
+ *  the same one. */
+const LOADING_ICON = "lucide:LoaderCircle";
+
 /**
  * A button, in the app's own shape.
  *
@@ -146,8 +157,28 @@ export function button(label, onClick, opts = {}) {
   // A spinning icon rather than a bar, for work with nothing to measure. The
   // button you pressed is where you are already looking, and it says which
   // component is busy without a second element having to name one.
-  const glyph = opts.icon ? icon(opts.icon, "currentColor", iconOnly ? 14 : 13) : null;
+  const size = iconOnly ? 14 : 13;
+  let glyph = opts.icon ? icon(loading(opts.spin, opts.icon), "currentColor", size) : null;
   if (glyph && opts.spin) glyph.style.animation = spinAnimation();
+
+  /**
+   * Swap between this button's own icon and the loading one.
+   *
+   * A SWAP, not a spin of whatever is already there: a rotating Play triangle
+   * or a rotating square is not a thing that is loading, it is a thing that has
+   * gone wrong. `LoaderCircle` is the one glyph that means "working" without
+   * having to be read, and it is the same glyph `status("working")` puts on the
+   * row - so the button and the row it sits on say the same thing the same way.
+   *
+   * @param {boolean} on
+   */
+  const setLoading = (on) => {
+    if (!glyph || !opts.icon) return;
+    const next = icon(loading(on, opts.icon), "currentColor", size);
+    if (on) next.style.animation = spinAnimation();
+    glyph.replaceWith(next);
+    glyph = next;
+  };
 
   const btn = /** @type {HTMLButtonElement} */ (
     h("button", { style: `${base};${skin}`, title: opts.title }, [
@@ -178,17 +209,17 @@ export function button(label, onClick, opts = {}) {
     btn.style.cursor = "progress";
     // Whatever this button does, it says so while it is doing it. Every handler
     // in this pane is async and most reach the network or the disk, and the
-    // button already knows exactly when that starts and ends - so the icon
-    // spins here rather than at each call site remembering to ask for it.
+    // button already knows exactly when that starts and ends - so this happens
+    // here rather than at each call site remembering to ask for it.
     // "Install Xdebug" downloads a DLL and reconfigures php.ini, and looked
     // frozen for every second of it.
-    if (glyph) glyph.style.animation = spinAnimation();
+    setLoading(true);
     try {
       await onClick();
     } finally {
       // The panel usually re-renders and throws this node away; restoring is
       // for the case where it does not.
-      if (glyph) glyph.style.animation = opts.spin ? spinAnimation() : "";
+      setLoading(Boolean(opts.spin));
       if (btn.isConnected) {
         btn.disabled = false;
         btn.style.opacity = "1";
@@ -586,7 +617,7 @@ export function status(tone, size = 13) {
 const STATUS_TONES = {
   ok: { icon: "lucide:CircleCheck", colour: "var(--tedi-icon-idle, #34d399)", spin: false },
   working: {
-    icon: "lucide:LoaderCircle",
+    icon: LOADING_ICON,
     colour: "var(--tedi-icon-working, #facc15)",
     spin: true,
   },
