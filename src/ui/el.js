@@ -91,6 +91,20 @@ function spinAnimation() {
   return `tedi-dev-spin ${SPIN_MS}ms linear infinite -${Date.now() % SPIN_MS}ms`;
 }
 
+/**
+ * Turn this glyph, about its own centre.
+ *
+ * One helper rather than an assignment at each site: `transform-origin` and the
+ * animation are the two facts that make a spin smooth, and a new call site that
+ * remembered only the second one is how the last one stopped being.
+ *
+ * @param {HTMLElement} el @returns {void}
+ */
+function startSpin(el) {
+  el.style.transformOrigin = "50% 50%";
+  el.style.animation = spinAnimation();
+}
+
 /** The loading glyph, or the caller's own. One name, so a button, a row and a
  *  status line cannot each pick a different idea of what "working" looks like.
  *  @param {boolean | undefined} on @param {string} own @returns {string} */
@@ -159,7 +173,7 @@ export function button(label, onClick, opts = {}) {
   // component is busy without a second element having to name one.
   const size = iconOnly ? 14 : 13;
   let glyph = opts.icon ? icon(loading(opts.spin, opts.icon), "currentColor", size) : null;
-  if (glyph && opts.spin) glyph.style.animation = spinAnimation();
+  if (glyph && opts.spin) startSpin(glyph);
 
   /**
    * Swap between this button's own icon and the loading one.
@@ -175,7 +189,7 @@ export function button(label, onClick, opts = {}) {
   const setLoading = (on) => {
     if (!glyph || !opts.icon) return;
     const next = icon(loading(on, opts.icon), "currentColor", size);
-    if (on) next.style.animation = spinAnimation();
+    if (on) startSpin(next);
     glyph.replaceWith(next);
     glyph = next;
   };
@@ -349,8 +363,23 @@ export function icon(name, colour, size = 15) {
   // so the second row silently rendered nothing.
   const fill = () => {
     const art = master?.firstChild;
-    if (art) slot.replaceChildren(art.cloneNode(true));
-    return Boolean(art);
+    if (!art) return false;
+    const copy = /** @type {HTMLElement} */ (art.cloneNode(true));
+    // The copy FILLS the slot exactly, and is a block.
+    //
+    // The slot is the box the spin animation is on, so the glyph inside it has
+    // to be that same box or the rotation is not about the glyph's own centre.
+    // Sized by the host it usually is, but it is a flex item, so a stylesheet
+    // that sets a height the slot does not share leaves it stretched: measured
+    // in Chromium, a 13px slot under a rule forcing `svg{height:16px}` renders
+    // a 13x16 glyph, and a rotating ellipse swells and shrinks rather than
+    // turning. Saying the size here is what makes the glyph a circle whatever
+    // the surrounding CSS believes.
+    copy.style.display = "block";
+    copy.style.width = "100%";
+    copy.style.height = "100%";
+    slot.replaceChildren(copy);
+    return true;
   };
 
   // `ctx.ui.icon` returns an EMPTY span and fills it when its lazy chunk lands,
@@ -604,7 +633,7 @@ export function status(tone, size = 13) {
   // a spinner that fades in and out is a blinking ring, which reads as a fault
   // light rather than as work in progress. Rotation is what that glyph is drawn
   // for, and it is the one animation nobody has to learn.
-  if (spec.spin) node.style.animation = spinAnimation();
+  if (spec.spin) startSpin(node);
   return node;
 }
 

@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.1.30
+
+- **"Stop all" left one service running and said it had not.** It picked the
+  services to stop by asking which ones it holds a process handle for, and a
+  service adopted after a crash or a restart has a pid and no handle. So the
+  one thing still holding port 80 was exactly the one it skipped, the button
+  reported success, and the next "Start all" failed with "Port 80 is already in
+  use" - a conflict with a service the button beside it had just promised to
+  stop. It now stops everything that is up, however it got there, and says
+  plainly what survived being asked.
+
+- **It asks first.** Stopping everything takes every site down at once, and it
+  was a single unguarded click among the buttons you press all day. There is now
+  the same confirmation the other destructive actions use, naming the services
+  it is about to stop, and the button shows it is working until they are.
+
+- **The loading spinner is a circle whatever the surrounding CSS believes.**
+  The animation sits on the fixed-size icon slot, and the glyph inside it kept
+  whatever size it was rendered at. It is a flex item, so a stylesheet setting
+  a height the slot does not share leaves it stretched: a 13px slot under a rule
+  forcing 16px-tall icons draws a 13x16 ellipse, and a rotating ellipse swells
+  and shrinks instead of turning. The glyph now fills its slot exactly, and one
+  helper starts every spin in this pane, so a new one cannot be added without
+  the origin that keeps it steady.
+
 ## 0.1.29
 
 - **The database drivers are on out of the box.** PHP ships `mysqli`,

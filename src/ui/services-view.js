@@ -103,7 +103,30 @@ export function servicesView(refresh) {
     button(
       "Stop all",
       async () => {
+        const up = [...state.services.values()].filter((s) => s.state === "running");
+        if (up.length === 0) {
+          ctx?.ui.toast("Nothing is running.", { variant: "info" });
+          return;
+        }
+        const ok = await confirm({
+          title: `Stop ${up.length} service${up.length === 1 ? "" : "s"}?`,
+          description:
+            `${up.map((s) => provider(s.id)?.label ?? s.id).join(", ")} stop, and every site ` +
+            "they serve stops answering. Your data and configuration are untouched.",
+          confirmLabel: "Stop all",
+          icon: "lucide:Square",
+        });
+        if (!ok) return;
         await stopAll();
+        // Say what is STILL up rather than assuming. A service this extension
+        // did not start, or one that restarts itself, survives being asked.
+        const left = [...state.services.values()].filter((s) => s.state === "running");
+        if (left.length) {
+          ctx?.ui.toast(
+            `Still running: ${left.map((s) => provider(s.id)?.label ?? s.id).join(", ")}.`,
+            { variant: "warning" },
+          );
+        }
         refresh();
       },
       { variant: "danger", icon: "lucide:Square" },

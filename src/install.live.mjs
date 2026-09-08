@@ -42,7 +42,7 @@ import { writeShims } from "./project/shims.js";
 import { writeGlobalEnv, applyRuntimeChange } from "./manager/apply.js";
 import { generate } from "./web/vhost.js";
 import { serverExe } from "./web/serverroot.js";
-import { start, stop, recoverRunning } from "./manager/services.js";
+import { start, stop, stopAll, recoverRunning } from "./manager/services.js";
 import { inUse, plannedPort } from "./web/ports.js";
 import {
   install as installPhpMyAdmin,
@@ -678,10 +678,14 @@ await step("a service still running after a crash is taken back over", async () 
     // would toast about services it recovered from itself.
     if ((await recoverRunning()) !== 0) throw new Error("re-adopted a service already running");
 
-    // And the whole point: it can be stopped without the handle it lost.
-    await stop("nginx");
-    if (await inUse(18080)) throw new Error("an adopted service could not be stopped");
-    console.log(`        adopted nginx (pid ${st.adopted}) on :18080, and stopped it again`);
+    // And the whole point: it can be stopped without the handle it lost. Through
+    // `stopAll`, because that is where it was NOT stopped: the button picked its
+    // services by asking which ones it holds a handle for, so the one service
+    // that had lost its handle was the one it skipped, and the next Start all
+    // failed on the port this one was still holding.
+    await stopAll();
+    if (await inUse(18080)) throw new Error("Stop all skipped the adopted service");
+    console.log(`        adopted nginx (pid ${st.adopted}) on :18080, and Stop all stopped it`);
   } finally {
     await stop("nginx").catch(() => {});
   }

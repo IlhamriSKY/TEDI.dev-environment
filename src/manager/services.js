@@ -715,8 +715,13 @@ export async function stopAll() {
       await stop(id).catch(() => {});
       continue;
     }
+    // Anything that is UP, however it got there. The test used to be "does it
+    // have a handle", which skipped exactly the services ADOPTED after a crash:
+    // those have a pid and no handle. So "Stop all" left one running, said it
+    // had stopped everything, and the next "Start all" failed with "Port 80 is
+    // already in use" - blaming a conflict on the button beside it.
     const s = state.services.get(id);
-    if (s?.handle !== null && s?.handle !== undefined) await stop(id).catch(() => {});
+    if (s && (s.state === "running" || s.state === "starting")) await stop(id).catch(() => {});
   }
 }
 

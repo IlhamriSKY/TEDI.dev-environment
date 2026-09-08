@@ -1026,6 +1026,41 @@ test("Start all consults the tick, and a web server's tick is which one", () => 
   );
 });
 
+test("Stop all stops what is up, not what has a handle", () => {
+  // A service ADOPTED after a crash has a pid and no handle, and the old test
+  // was "does it have a handle" - so Stop all skipped exactly those, reported
+  // success, and the next Start all failed with "Port 80 is already in use",
+  // blaming a conflict on the button beside it.
+  const src = readFileSync(new URL("./manager/services.js", import.meta.url), "utf8");
+  const at = src.indexOf("export async function stopAll");
+  assert.ok(at > 0, "stopAll is gone");
+  const body = src.slice(at, src.indexOf("\\n" + "}", at));
+  assert.ok(
+    !body.includes("handle !== null"),
+    "stopAll selects by handle again, so an adopted service is skipped",
+  );
+  assert.ok(
+    body.includes('s.state === "running"'),
+    "stopAll no longer selects the services that are actually up",
+  );
+
+  // And it asks first. Stopping everything takes every site down at once, which
+  // is the one action in this pane with no undo and no partial version.
+  const view = readFileSync(new URL("./ui/services-view.js", import.meta.url), "utf8");
+  const at2 = view.indexOf('"Stop all"');
+  assert.ok(at2 > 0, "the Stop all button is gone");
+  const handler = view.slice(at2, at2 + 1200);
+  assert.ok(
+    handler.includes("await confirm("),
+    "Stop all no longer asks before it stops everything",
+  );
+  assert.ok(
+    handler.indexOf("await confirm(") < handler.indexOf("await stopAll()"),
+    "Stop all stops first and asks after",
+  );
+  assert.ok(handler.includes("Still running:"), "Stop all no longer says what survived it");
+});
+
 console.log("\nasking for administrator rights");
 
 // The hosts file is the only thing here that needs elevation, and it holds ONE
@@ -1157,6 +1192,27 @@ test("every row that can be busy draws the working state", () => {
     const src = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
     assert.ok(src.includes(needle), `${file} does not show a working state; it draws idle instead`);
   }
+});
+
+test("a spinner turns about its own centre", () => {
+  // A glyph rotates about the centre of the box the animation is on. The box is
+  // the fixed-size slot; the glyph inside it was whatever the host rendered, so
+  // when the two centres did not coincide the spin traced a small circle and the
+  // icon read as bobbing up and down rather than turning.
+  const el = readFileSync(new URL("./ui/el.js", import.meta.url), "utf8");
+  const fill = el.slice(el.indexOf("const fill = () =>"), el.indexOf("// `ctx.ui.icon` returns"));
+  assert.ok(fill.length > 0, "icon() no longer clones its master");
+  for (const decl of ['copy.style.width = "100%"', 'copy.style.height = "100%"']) {
+    assert.ok(fill.includes(decl), `the copied glyph no longer fills its slot (${decl})`);
+  }
+  // And one place decides what spinning means, so a new call site cannot start
+  // an animation without the origin that makes it smooth.
+  assert.ok(
+    el.includes('el.style.transformOrigin = "50% 50%"'),
+    "startSpin no longer sets an origin",
+  );
+  const calls = el.match(/style\.animation = spinAnimation\(\)/g) ?? [];
+  assert.equal(calls.length, 1, "something starts the spin without going through startSpin()");
 });
 
 console.log("\nthe version picker");
