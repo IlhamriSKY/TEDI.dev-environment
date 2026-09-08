@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.6
+
+- **Package managers opens on a skeleton, and opens faster.** It surveyed npm,
+  pnpm, Yarn and Bun one after another - four `--version` subprocesses in a
+  row, with Bun's PATH search in front of its own - and showed nothing at all
+  until the last one answered. They run together now, and the wait that is left
+  is drawn as the rows it is about to become rather than as an empty dialog. A
+  skeleton over something that could just be fast is decoration hiding a defect,
+  so the order matters: the survey got quicker first.
+
+- **PHP configuration does the same, and its comment stops lying.** That dialog
+  had a comment claiming it drew a placeholder first; it did not, so opening it
+  showed a blank box for as long as reading php.ini and running `php -m` took.
+  Both placeholders are the app's own `bg-muted` + `animate-pulse`, taken from
+  the `--animate-pulse` token rather than reimplemented, and both appear on the
+  FIRST open only - a redraw already has an answer on screen, and replacing it
+  with grey blocks reads as the dialog throwing its contents away.
+
 ## 0.1.5
 
 - **A freshly installed PHP now has a php.ini.** It had none. The Windows zip

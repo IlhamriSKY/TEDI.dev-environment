@@ -11,7 +11,7 @@
 // appears on your PATH. npm arrives inside Node, pnpm and Yarn are switched on
 // through Corepack, and Bun is whatever you installed yourself.
 
-import { h, row, muted, pill, button, status, mark, modal, dropdown } from "./el.js";
+import { h, row, muted, pill, button, status, mark, modal, dropdown, skeleton } from "./el.js";
 import { markFor } from "./marks.js";
 import { survey, enablePackager } from "../manager/packagers.js";
 import { installedOf } from "../manager/versions.js";
@@ -49,6 +49,11 @@ export function openPackagers(nodeVersion, refreshPane) {
   );
 
   const draw = async () => {
+    // Only on the FIRST draw. A redraw - switching Node, or coming back from
+    // enabling pnpm - already has the previous answer on screen, and replacing
+    // it with grey blocks for a moment reads as the dialog having thrown its
+    // contents away rather than as it working.
+    if (body.childElementCount === 0) body.replaceChildren(...PACKAGERS.map(skeletonRow));
     const rows = await survey(current);
     body.replaceChildren(...rows.map((p) => packagerRow(p, current, draw)));
     refreshPane();
@@ -72,6 +77,29 @@ export function openPackagers(nodeVersion, refreshPane) {
   });
 
   void draw();
+}
+
+/** The four this dialog always lists, so the placeholder is the right height
+ *  and the dialog does not resize under the cursor when the answers land. */
+const PACKAGERS = ["npm", "pnpm", "yarn", "bun"];
+
+/**
+ * One row's worth of placeholder, laid out like the real thing.
+ *
+ * Shaped rather than a single bar: the point of a skeleton is that the content
+ * appears where the eye is already looking, and a row that turns from one grey
+ * block into five separate things has moved everything anyway.
+ *
+ * @returns {HTMLElement}
+ */
+function skeletonRow() {
+  return row([
+    skeleton("15px", 15),
+    skeleton("13px", 13),
+    skeleton("46px", 11),
+    skeleton("38px", 13),
+    skeleton("150px", 10),
+  ]);
 }
 
 /**

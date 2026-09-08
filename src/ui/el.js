@@ -614,6 +614,33 @@ export function progress(pct) {
   );
 }
 
+/**
+ * A loading placeholder, in the app's own shape.
+ *
+ * `settings/sections/components/InstallReviewDialog.tsx` draws exactly this
+ * while an extension's icon is fetched: a `bg-muted` block with `animate-pulse`.
+ * The animation is taken from `--animate-pulse` rather than written out, so the
+ * timing is the app's and stays the app's; the literal behind it is the same
+ * value Tailwind emits, for a host that predates the token.
+ *
+ * Used only where the wait is REAL and unavoidable. A skeleton over something
+ * that could just be fast is decoration hiding a defect - which is why the
+ * survey behind the one in `packagers-view` was made concurrent in the same
+ * change.
+ *
+ * @param {string} [width] Any CSS length.
+ * @param {number} [height] Pixels.
+ * @returns {HTMLElement}
+ */
+export function skeleton(width = "100%", height = 11) {
+  return h("div", {
+    attrs: { "aria-hidden": "true" },
+    style:
+      `width:${width};height:${height}px;flex:none;background:var(--muted);` +
+      `animation:var(--animate-pulse, pulse 2s cubic-bezier(.4,0,.6,1) infinite)`,
+  });
+}
+
 /** A muted one-line caption. @param {string} text @returns {HTMLElement} */
 export function muted(text) {
   return h("span", {

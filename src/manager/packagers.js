@@ -45,39 +45,50 @@ function cliName(name) {
  */
 export async function survey(nodeVersion) {
   const node = resolveVersion("node", nodeVersion);
-  /** @type {PackagerStatus[]} */
-  const out = [];
 
-  for (const [id, label] of /** @type {[string, string][]} */ ([
-    ["npm", "npm"],
-    ["pnpm", "pnpm"],
-    ["yarn", "Yarn"],
-  ])) {
-    const path = node ? join(node.binDir, cliName(id)) : null;
-    const present = path ? await exists(path) : false;
-    const version = present && path ? await probe(path, ["--version"]) : null;
-    out.push({
-      id,
-      label,
-      available: present,
-      version,
-      origin: id === "npm" ? "bundled" : "corepack",
-      // npm needs no enabling; the other two do, and only when Node is ours.
-      canEnable: id !== "npm" && Boolean(node) && !present,
-    });
-  }
+  // All four at once. Each is an existence check and then a `--version`
+  // SUBPROCESS, and done one after another that is four spawns plus four poll
+  // loops before the dialog can draw anything - which is what made opening it
+  // feel slow enough to want a skeleton behind. Nothing here reads anything
+  // another one writes, so the sequence bought nothing.
+  const [managed, bun] = await Promise.all([
+    Promise.all(
+      /** @type {[string, string][]} */ ([
+        ["npm", "npm"],
+        ["pnpm", "pnpm"],
+        ["yarn", "Yarn"],
+      ]).map(async ([id, label]) => {
+        const path = node ? join(node.binDir, cliName(id)) : null;
+        const present = path ? await exists(path) : false;
+        const version = present && path ? await probe(path, ["--version"]) : null;
+        return /** @type {PackagerStatus} */ ({
+          id,
+          label,
+          available: present,
+          version,
+          origin: id === "npm" ? "bundled" : "corepack",
+          // npm needs no enabling; the other two do, and only when Node is ours.
+          canEnable: id !== "npm" && Boolean(node) && !present,
+        });
+      }),
+    ),
+    // Bun is the slowest of the four, because finding it is a PATH search
+    // (`where` / `command -v`) before the version probe rather than a path we
+    // already know. Running it alongside is what stops it setting the pace.
+    (async () => {
+      const hit = await which("bun");
+      return /** @type {PackagerStatus} */ ({
+        id: "bun",
+        label: "Bun",
+        available: Boolean(hit),
+        version: hit ? await probe(hit, ["--version"]) : null,
+        origin: "system",
+        canEnable: false,
+      });
+    })(),
+  ]);
 
-  const bun = await which("bun");
-  out.push({
-    id: "bun",
-    label: "Bun",
-    available: Boolean(bun),
-    version: bun ? await probe(bun, ["--version"]) : null,
-    origin: "system",
-    canEnable: false,
-  });
-
-  return out;
+  return [...managed, bun];
 }
 
 /**

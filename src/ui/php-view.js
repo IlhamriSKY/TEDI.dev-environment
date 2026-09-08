@@ -13,7 +13,19 @@
 // things a user actually watches - what is running, and which projects exist -
 // off the bottom of a short pane.
 
-import { h, row, muted, pill, button, dropdown, input, icon, mark, modal } from "./el.js";
+import {
+  h,
+  row,
+  muted,
+  pill,
+  button,
+  dropdown,
+  input,
+  icon,
+  mark,
+  modal,
+  skeleton,
+} from "./el.js";
 import { markFor } from "./marks.js";
 import { installedOf } from "../manager/versions.js";
 import { activeVersion } from "../manager/config.js";
@@ -72,9 +84,15 @@ export function openPhpConfig(version, refreshPane) {
    *  or an extension toggle changes what the dashboard shows too. */
   const draw = async () => {
     const version = /** @type {string} */ (current);
-    // Placeholder first. Every block below reads a file or shells out to
-    // `php -m`, and blanking the dialog for half a second on each redraw reads
-    // as the thing having crashed.
+    // A placeholder, and it really is one now. This comment used to claim one
+    // while the body simply stayed empty until every block resolved - so the
+    // first open showed a blank dialog for as long as reading php.ini and
+    // running `php -m` took.
+    //
+    // First open only. A redraw already has the previous answer on screen, and
+    // replacing that with grey blocks reads as the dialog throwing its contents
+    // away rather than as it working.
+    if (body.childElementCount === 0) body.replaceChildren(loadingBlocks());
     const blocks = [
       systemNotice(version),
       await settingsBlock(version, draw),
@@ -102,6 +120,38 @@ export function openPhpConfig(version, refreshPane) {
   });
 
   void draw();
+}
+
+/**
+ * What the dialog shows while it reads php.ini and asks `php -m` what is loaded.
+ *
+ * Laid out as the sections it is about to become - a settings grid, a row, a
+ * grid of extension chips - so the content lands where the eye already is
+ * rather than after everything shifts.
+ *
+ * @returns {HTMLElement}
+ */
+function loadingBlocks() {
+  const bar = (/** @type {string} */ w, /** @type {number} */ h) => skeleton(w, h);
+  return h("div", { style: "display:flex;flex-direction:column;gap:14px" }, [
+    h("div", { style: "display:flex;flex-direction:column;gap:7px" }, [
+      bar("62px", 9),
+      h(
+        "div",
+        { style: "display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:9px" },
+        Array.from({ length: 8 }, () => bar("100%", 30)),
+      ),
+    ]),
+    h("div", { style: "display:flex;flex-direction:column;gap:7px" }, [bar("70px", 9), bar("100%", 34)]),
+    h("div", { style: "display:flex;flex-direction:column;gap:7px" }, [
+      bar("78px", 9),
+      h(
+        "div",
+        { style: "display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px" },
+        Array.from({ length: 12 }, () => bar("100%", 22)),
+      ),
+    ]),
+  ]);
 }
 
 /**
