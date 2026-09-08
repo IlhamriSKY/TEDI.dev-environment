@@ -6,7 +6,7 @@
 // their project is not on the version they set globally, which is otherwise the
 // most confusing thing a version manager does.
 
-import { h, row, pill, muted, button, dropdown, section, status, icon } from "./el.js";
+import { h, row, pill, muted, button, dropdown, section, status, icon, confirm } from "./el.js";
 import {
   domainOf,
   addProject,
@@ -145,6 +145,13 @@ async function projectRow(project, refresh) {
     button(
       "Remove",
       async () => {
+        const ok = await confirm({
+          title: `Remove ${project.name}?`,
+          description:
+            "Its virtual host, certificate and hosts entry go. The folder and everything " +
+            "in it stays exactly where it is.",
+        });
+        if (!ok) return;
         await removeProject(project.id);
         await publish().catch(() => {});
         refresh();

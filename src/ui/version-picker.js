@@ -33,7 +33,11 @@ export async function openInstaller(p, refresh) {
   // repaints unconditionally, so the frame that lands at 100% is never the one
   // that gets dropped.
   const tick = throttle(refresh);
-  state.busy.set(p.id, { text: "Checking available versions" });
+  // `quiet`, so the row does NOT grow an indeterminate progress bar for this.
+  // A sweeping bar is the shape of a download; this is one metadata request
+  // that usually takes a few hundred milliseconds, and the honest signal for it
+  // is the button you just pressed still working.
+  state.busy.set(p.id, { text: "Checking available versions", quiet: true });
   refresh();
   try {
     const list = await p.versions();
@@ -115,8 +119,13 @@ function pickVersion(p, list) {
      */
     const draw = () => {
       const q = field.value.trim().toLowerCase();
-      const hits = (q ? list.filter((v) => v.version.toLowerCase().includes(q)) : list).slice(0, 60);
-      results.replaceChildren(...hits.map((v) => versionRow(v, have.has(v.version), finish, () => dialog.close())));
+      const hits = (q ? list.filter((v) => v.version.toLowerCase().includes(q)) : list).slice(
+        0,
+        60,
+      );
+      results.replaceChildren(
+        ...hits.map((v) => versionRow(v, have.has(v.version), finish, () => dialog.close())),
+      );
       if (hits.length === 0) results.append(muted("No version matches that."));
     };
 
@@ -138,6 +147,21 @@ function pickVersion(p, list) {
     });
     field.focus();
   });
+}
+
+/**
+ * The release date as day-month-year.
+ *
+ * Upstreams state it ISO, which sorts well and reads as a foreign format in a
+ * list nobody is sorting by hand. Reformatted from the STRING rather than
+ * through `Date`, because parsing a bare `2024-04-24` gives midnight UTC and
+ * anyone west of it would see the day before.
+ *
+ * @param {string} released @returns {string}
+ */
+export function releaseDate(released) {
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(released));
+  return iso ? `${iso[3]}-${iso[2]}-${iso[1]}` : String(released).slice(0, 10);
 }
 
 /**
@@ -213,7 +237,7 @@ function versionRow(v, installed, finish, close) {
         : pill("Stable", { icon: "lucide:CircleCheck", title: "A finished release" }),
       // The date the project itself states, when it states one. Two versions a
       // year apart is the thing a bare number cannot tell you.
-      v.released ? muted(String(v.released).slice(0, 10)) : null,
+      v.released ? muted(releaseDate(v.released)) : null,
     ],
   );
 }

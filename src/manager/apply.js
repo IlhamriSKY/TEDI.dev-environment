@@ -26,6 +26,7 @@ import { refreshAllRuntimes } from "../project/projects.js";
 import { renderEnvFile } from "../project/shims.js";
 import { writeText } from "../core/fsx.js";
 import { paths } from "../core/paths.js";
+import { publishHandoff } from "./handoff.js";
 import { config, warn } from "../runtime.js";
 
 /**
@@ -83,4 +84,7 @@ export async function applyRuntimeChange() {
   await ensurePhpInis();
   await writeGlobalEnv();
   await refreshAllRuntimes();
+  // Which databases exist and on what port both just changed. The file is a
+  // courtesy to another extension and never throws, so it goes last.
+  await publishHandoff();
 }

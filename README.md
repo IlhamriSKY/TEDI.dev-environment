@@ -39,8 +39,17 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
   landing on the next one along.
 - **Databases as services.** MySQL, PostgreSQL and Redis start, stop and
   initialise their data directories from the dashboard.
+- **The databases show up in SQL Explorer by themselves.** Install MySQL or
+  PostgreSQL here and, if you have the
+  [SQL Explorer](https://github.com/IlhamriSKY/tedi.sql-explorer) extension,
+  they appear in its Databases list with the right host, port and user already
+  filled in. Change a port and the saved connection follows it; remove the
+  database and the connection goes with it. Nothing to configure on either side,
+  and nothing happens if you do not have that extension.
 - **PHP extensions and Xdebug** on Windows, with compatibility filtering: only
   builds matching your PHP's branch, thread-safety and architecture are offered.
+- **Nothing is removed without asking.** Every Remove here - a version, a
+  project, a scheduled job - says what actually goes before it goes.
 
 ## Setting it up
 
@@ -128,6 +137,10 @@ metadata cache and the download staging area. Nothing in it is yours to edit and
 all of it is rebuilt, which is why it is one folder instead of eight at the top
 level. An environment created before this release is moved into the new shape
 once, on the next launch, and the terminal PATH entry moves with it.
+
+One file is written outside it: `~/.tedi/dev-environment.json`, which is how
+SQL Explorer finds the databases above. It holds a host, a port and a user, no
+password, and is deleted when the last database is.
 
 Nothing is installed into the system, so moving or deleting that one folder is
 the whole uninstall. The two exceptions are stated where they happen and both

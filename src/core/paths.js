@@ -252,6 +252,7 @@ function globalEnv() {
 }
 
 export const paths = {
+  home,
   root,
   internal,
   cache,

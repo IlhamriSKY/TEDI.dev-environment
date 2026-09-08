@@ -16,7 +16,7 @@ import { spawnSync } from "node:child_process";
 import { renderHosts, MARKERS } from "./web/hosts.js";
 import { SHIMS, windowsShim, posixShim } from "./project/shims.js";
 import { plan } from "./core/archive.js";
-import { setCtx, setConfig } from "./runtime.js";
+import { setCtx, setConfig, state } from "./runtime.js";
 import { parseLoungeIndex } from "./registry/servers.js";
 import { matches, isValidSchedule, splitCommand } from "./manager/cron.js";
 import { loadModuleLines } from "./web/serverroot.js";
@@ -26,6 +26,8 @@ import { compareVersions, majorMinor, isPrerelease } from "./registry/util.js";
 import { versionSatisfies } from "./project/resolve.js";
 import { slug } from "./project/projects.js";
 import { fastcgiPort } from "./web/vhost.js";
+import { offeredConnections } from "./manager/handoff.js";
+import { releaseDate } from "./ui/version-picker.js";
 
 let passed = 0;
 /** @param {string} name @param {() => void} fn */
@@ -453,9 +455,17 @@ test("every runtime mutation is followed by applyRuntimeChange", () => {
   }
 });
 
-test("applyRuntimeChange does all three things, not one", () => {
+test("applyRuntimeChange does every consequence, not one", () => {
   const src = readFileSync(new URL("./manager/apply.js", import.meta.url), "utf8");
-  for (const step of ["scanInstalled()", "writeGlobalEnv()", "refreshAllRuntimes()"]) {
+  const steps = [
+    "scanInstalled()",
+    "writeGlobalEnv()",
+    "refreshAllRuntimes()",
+    // A database install changes what the handoff file offers, so it is a
+    // consequence of a runtime change exactly like the three above.
+    "publishHandoff()",
+  ];
+  for (const step of steps) {
     assert.ok(src.includes(step), `applyRuntimeChange no longer calls ${step}`);
   }
 });
@@ -561,6 +571,81 @@ test("a comment line in the runtime file is not parsed as a key", () => {
   assert.ok(!out.includes("commented"), `used a commented-out line: ${out}`);
   assert.doesNotMatch(out, UNCONFIGURED, `the commented line broke the parse: ${out}`);
   assert.ok(ranMarker(out, "RIGHT_PHP_RAN"), `did not run the uncommented value: ${out}`);
+});
+
+console.log("\nasking before destroying (source, because a modal needs a DOM)");
+
+// Every Remove in this pane used to fire on the first click. They are not
+// equal - removing a project unpublishes a site, removing a version deletes a
+// four-minute download - and none of them can be undone, so all of them ask.
+// Source text for the same reason the check above is: the alternative is
+// mounting the whole extension host to click a button.
+
+test("every Remove asks first", () => {
+  const sites = [
+    ["ui/runtimes-view.js", "await uninstall("],
+    ["ui/cron-view.js", "await removeJob("],
+    ["ui/projects-view.js", "await removeProject("],
+  ];
+  for (const [file, call] of sites) {
+    const src = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+    const at = src.indexOf(call);
+    assert.ok(at > 0, `${file}: nothing calls ${call} any more`);
+    // The confirm and its bail-out both come BEFORE the destructive call, or
+    // the dialog is decoration over something that already happened.
+    const before = src.slice(0, at);
+    assert.ok(
+      before.lastIndexOf("await confirm({") > before.lastIndexOf("button("),
+      `${file}: ${call} is reachable without confirm()`,
+    );
+    assert.ok(before.includes("if (!ok) return;"), `${file}: ${call} ignores the answer`);
+  }
+});
+
+console.log("\nthe version picker");
+
+test("a release date reads day-month-year, whatever the upstream sends", () => {
+  // Every upstream states it ISO, some with a time on the end, and one or two
+  // send nothing recognisable at all. The last case must still render: a picker
+  // row that throws takes the whole list with it.
+  assert.equal(releaseDate("2024-04-24"), "24-04-2024");
+  assert.equal(releaseDate("2024-04-24T19:35:44.000Z"), "24-04-2024");
+  assert.equal(releaseDate("2026-01-05"), "05-01-2026", "a single-digit day keeps its zero");
+  assert.equal(releaseDate("8.3.14"), "8.3.14", "an unparseable date is shown, not dropped");
+  assert.equal(releaseDate(""), "");
+});
+
+console.log("\nthe database handoff");
+
+// What another extension is handed. The shape is SQL Explorer's own connection
+// record on purpose, so its existing import sanitiser accepts these unchanged;
+// these assertions are the parts of that shape a typo would break silently,
+// because the reader answers a bad record by showing nothing at all.
+
+test("every offered connection is addressable and prefixed", () => {
+  for (const id of ["mysql", "postgres"]) {
+    state.installed.set(id, [{ version: "1.0", origin: "download", dir: "/x", binDir: "/x" }]);
+  }
+  const offered = offeredConnections();
+  assert.equal(offered.length, 2, "both installed databases are offered");
+  for (const conn of offered) {
+    assert.ok(conn.id.startsWith("devenv:"), `${conn.id} is not namespaced to this extension`);
+    assert.equal(conn.host, "127.0.0.1", "a managed database is loopback only");
+    // The reader stores ports as strings (a blank one means "the dialect
+    // default"), so a number here would be dropped by its sanitiser.
+    assert.equal(typeof conn.port, "string", `${conn.id}: port must be a string`);
+    assert.ok(Number(conn.port) > 0, `${conn.id}: port ${conn.port} is not a port`);
+    assert.ok(conn.user, `${conn.id}: no user to log in as`);
+  }
+  // PostgreSQL binds ONE database per connection, so a blank target cannot
+  // connect at all; MySQL reaches every database over one connection.
+  assert.equal(offered.find((c) => c.kind === "postgres")?.database, "postgres");
+  state.installed.clear();
+});
+
+test("nothing is offered when no database is installed", () => {
+  state.installed.clear();
+  assert.deepEqual(offeredConnections(), []);
 });
 
 rmSync(tmp, { recursive: true, force: true });

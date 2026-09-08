@@ -83,7 +83,7 @@ export function h(tag, props = {}, children = []) {
  * @param {string} label
  * @param {() => unknown | Promise<unknown>} onClick
  * @param {{ variant?: "primary" | "default" | "danger" | "ghost", title?: string,
- *           disabled?: boolean, icon?: string }} [opts]
+ *           disabled?: boolean, icon?: string, spin?: boolean }} [opts]
  * @returns {HTMLButtonElement}
  */
 export function button(label, onClick, opts = {}) {
@@ -114,9 +114,15 @@ export function button(label, onClick, opts = {}) {
   // The label lives in its own span rather than as the button's text, so an
   // icon can sit beside it and so the busy state below can dim the button
   // without erasing the icon along with the words.
+  // A spinning icon rather than a bar, for work with nothing to measure. The
+  // button you pressed is where you are already looking, and it says which
+  // component is busy without a second element having to name one.
+  const glyph = opts.icon ? icon(opts.icon, "currentColor", iconOnly ? 14 : 13) : null;
+  if (glyph && opts.spin) glyph.style.animation = "tedi-dev-spin .9s linear infinite";
+
   const btn = /** @type {HTMLButtonElement} */ (
     h("button", { style: `${base};${skin}`, title: opts.title }, [
-      opts.icon ? icon(opts.icon, "currentColor", iconOnly ? 14 : 13) : null,
+      glyph,
       iconOnly ? null : h("span", { text: label }),
     ])
   );
@@ -758,7 +764,7 @@ export function textInput(placeholder, width = "100%", height = 26) {
  * in the header was the single thing that made these read as someone else's
  * dialogs.
  *
- * @param {{ title: Node | string, description?: string, body: Node, footer?: Node,
+ * @param {{ title: Node | string, description?: string, body?: Node | null, footer?: Node,
  *           width?: string, onClose?: () => void }} opts
  * @returns {{ el: HTMLElement, close: () => void }}
  */
@@ -874,7 +880,8 @@ if (typeof document !== "undefined" && !document.getElementById("tedi-devenv-ani
         "@keyframes tedi-dev-pop{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}" +
         // The indeterminate progress sweep. Travels the full track width plus
         // its own, so the block leaves one edge exactly as it enters the other.
-        "@keyframes tedi-dev-sweep{0%{transform:translateX(-100%)}100%{transform:translateX(250%)}}",
+        "@keyframes tedi-dev-sweep{0%{transform:translateX(-100%)}100%{transform:translateX(250%)}}" +
+        "@keyframes tedi-dev-spin{to{transform:rotate(360deg)}}",
     }),
   );
 }
@@ -896,4 +903,44 @@ export function input(value, onCommit, placeholder = "") {
     if (/** @type {KeyboardEvent} */ (ev).key === "Enter") el.blur();
   });
   return el;
+}
+
+/**
+ * Ask before doing something that cannot be undone.
+ *
+ * Every Remove in this pane used to fire on the first click, and they are not
+ * equal: removing a project unpublishes a site, removing a version deletes a
+ * download that took four minutes to fetch. One shared dialog rather than a
+ * confirm flag on `button`, because the wording is the whole value - "Remove"
+ * twice tells you nothing about what is about to go.
+ *
+ * Resolves false on Escape, on the backdrop, and on the close button, so every
+ * way out of the dialog except the danger button is a no.
+ *
+ * @param {{ title: string, description: string, confirmLabel?: string,
+ *           icon?: string }} opts
+ * @returns {Promise<boolean>}
+ */
+export function confirm(opts) {
+  return new Promise((resolve) => {
+    let answer = false;
+    const dialog = modal({
+      title: opts.title,
+      description: opts.description,
+      body: null,
+      footer: h("div", { style: "display:flex;gap:8px;justify-content:flex-end" }, [
+        button("Cancel", () => dialog.close()),
+        button(
+          opts.confirmLabel ?? "Remove",
+          () => {
+            answer = true;
+            dialog.close();
+          },
+          { variant: "danger", icon: opts.icon ?? "lucide:Trash2" },
+        ),
+      ]),
+      width: "min(24rem,100%)",
+      onClose: () => resolve(answer),
+    });
+  });
 }

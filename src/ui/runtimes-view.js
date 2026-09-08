@@ -7,7 +7,7 @@
 // that sometimes takes 200ms and sometimes takes four minutes trains people to
 // be afraid of it.
 
-import { h, row, muted, button, dropdown, section, mark, progress } from "./el.js";
+import { h, row, muted, button, dropdown, section, mark, progress, confirm } from "./el.js";
 import { openPhpConfig } from "./php-view.js";
 import { openPackagers } from "./packagers-view.js";
 import { markFor } from "./marks.js";
@@ -144,13 +144,21 @@ function runtimeRow(p, refresh) {
     button("Install", () => void openInstaller(p, refresh), {
       icon: "lucide:Download",
       disabled: Boolean(busy),
-      title: `Install another ${p.label} version`,
+      spin: busy?.quiet,
+      title: busy?.quiet ? busy.text : `Install another ${p.label} version`,
     }),
     installed.some((v) => v.origin === "download" && v.version === active)
       ? button(
           "Remove",
           async () => {
             if (!active) return;
+            const ok = await confirm({
+              title: `Remove ${p.label} ${active}?`,
+              description:
+                `The installed files are deleted. Anything pinned to ${active} falls back to ` +
+                `the next version, and getting it back is another download.`,
+            });
+            if (!ok) return;
             await uninstall(p, active);
             await setActiveVersion(p.id, null);
             await applyRuntimeChange();
@@ -163,8 +171,9 @@ function runtimeRow(p, refresh) {
 
   const line = row([left, middle, right]);
   // Same shape the setup checklist uses: the bar belongs to the row doing the
-  // work, so nothing has to say which component it is measuring.
-  if (!busy) return line;
+  // work, so nothing has to say which component it is measuring. A `quiet` step
+  // has no transfer behind it and says so on the Install button instead.
+  if (!busy || busy.quiet) return line;
   return h("div", { style: "display:flex;flex-direction:column;min-width:0" }, [
     line,
     progress(busy.pct),

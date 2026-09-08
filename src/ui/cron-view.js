@@ -10,7 +10,19 @@
 // the thing people paste in from a README; offering a builder instead would
 // mean translating what they already have into clicks.
 
-import { h, row, pill, muted, button, status, icon, mark, modal, textInput } from "./el.js";
+import {
+  h,
+  row,
+  pill,
+  muted,
+  button,
+  status,
+  icon,
+  mark,
+  modal,
+  textInput,
+  confirm,
+} from "./el.js";
 import {
   listJobs,
   saveJob,
@@ -213,6 +225,11 @@ function jobRow(job, refresh) {
     button(
       "Remove",
       async () => {
+        const ok = await confirm({
+          title: "Remove this job?",
+          description: `${job.schedule}  ${job.command} stops running and the schedule is gone.`,
+        });
+        if (!ok) return;
         await removeJob(job.id);
         refresh();
       },

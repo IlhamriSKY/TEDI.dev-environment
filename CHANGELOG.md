@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.1.9
+
+- **The databases turn up in SQL Explorer by themselves.** Install MySQL or
+  PostgreSQL here and, with the SQL Explorer extension present, they appear in
+  its Databases list with the right host, port and user already filled in.
+  Change a port and the saved connection follows it; remove the database and
+  the connection goes with it. Nothing to configure on either side, and nothing
+  happens if that extension is not installed.
+
+  The handoff is a file, `~/.tedi/dev-environment.json`, because the host
+  deliberately gives two extensions no way to reach each other: settings, events
+  and secrets are all namespaced under the id of whoever is calling, and
+  `openExtensionTab` hard-wires the caller's own id. Reaching around that into
+  the app's settings file would work today and break later. The file states a
+  fact rather than issuing a command, carries no password because there is none
+  to carry, and is deleted rather than emptied when the last database goes.
+
+- **Nothing is removed without asking.** Remove on a version, a project or a
+  scheduled job now says what actually goes before it goes - the installed files
+  and another download to get them back, the virtual host and certificate but
+  never the folder, the schedule. All three fired on the first click, and none
+  of them can be undone.
+
+- **Release dates read day-month-year**, and picking a version no longer draws a
+  progress bar to fetch the list. A sweeping bar is the shape of a download;
+  that is one metadata request, so the Install icon you just pressed spins
+  instead.
+
 ## 0.1.8
 
 - **Every service can install another version, from its own row.** Nginx,

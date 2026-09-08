@@ -22,6 +22,7 @@ import { migrateLayout, legacyShimDir } from "./manager/migrate.js";
 import { loadJobs } from "./manager/cron.js";
 import { relocateTerminalPath } from "./ui/setup.js";
 import { writeGlobalEnv, ensurePhpInis } from "./manager/apply.js";
+import { publishHandoff } from "./manager/handoff.js";
 import { seedDefaults } from "./manager/defaults.js";
 import { mountDashboard } from "./ui/dashboard.js";
 import { clearIconCache } from "./ui/el.js";
@@ -90,6 +91,9 @@ export async function activate(context) {
     await ensurePhpInis();
     await writeGlobalEnv();
     await refreshAllRuntimes();
+    // Same reason: a database installed before this existed was never published
+    // to anyone, and the reader only ever looks at the file.
+    await publishHandoff();
   } catch (err) {
     // Surfaced on the setup screen rather than swallowed, because the panel is
     // about to render a checklist and "root folder" is the step that fixes it.

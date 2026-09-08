@@ -83,6 +83,9 @@ export function setConfig(patch) {
  *   bar indeterminate rather than draw a confident 0%.
  * @property {number} [step]   Which component of a batch this is, 1-based.
  * @property {number} [total]  How many the batch has.
+ * @property {boolean} [quiet] Do not draw a progress bar for this step. For
+ *   work with no transfer behind it - fetching a version list - where a
+ *   sweeping bar promises a download that is not happening.
  */
 
 /**

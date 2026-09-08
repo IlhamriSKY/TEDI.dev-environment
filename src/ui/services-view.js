@@ -38,6 +38,7 @@ import {
 import { listJobs, runningCount } from "../manager/cron.js";
 import { plannedPort, defaultPortFor, isWebServer } from "../web/ports.js";
 import { setServicePort, writeSetting } from "../manager/config.js";
+import { publishHandoff } from "../manager/handoff.js";
 import { publish } from "../web/publish.js";
 import { openCron } from "./cron-view.js";
 import { openInstaller } from "./version-picker.js";
@@ -252,6 +253,9 @@ function portControl(id, st, live, refresh) {
       // A generated vhost carries the web server's port in its `listen` lines,
       // so a port change is a republish and not just a stored number.
       await publish().catch(() => {});
+      // And a database's port is in the connection another extension was
+      // handed, so that is a republish too.
+      await publishHandoff();
       refresh();
     },
     String(defaultPortFor(id)),
@@ -310,7 +314,9 @@ function serviceRow(id, refresh) {
           style: "font-size:12px;font-weight:600;line-height:1.35",
         }),
         h("span", { style: "display:flex;align-items:center;gap:5px" }, [
-          status(busy ? "working" : running ? "ok" : failed ? "error" : starting ? "working" : "idle"),
+          status(
+            busy ? "working" : running ? "ok" : failed ? "error" : starting ? "working" : "idle",
+          ),
           muted(
             busy
               ? `${busy.text}${busy.pct === undefined ? "" : ` ${busy.pct}%`}`
@@ -375,7 +381,8 @@ function serviceRow(id, refresh) {
       : button("Install", () => p && void openInstaller(p, refresh), {
           icon: "lucide:Download",
           disabled: Boolean(busy),
-          title: "Install another " + (p?.label ?? id) + " version",
+          spin: busy?.quiet,
+          title: busy?.quiet ? busy.text : "Install another " + (p?.label ?? id) + " version",
         }),
     inProcess
       ? button("Jobs", () => openCron(refresh), {
@@ -407,8 +414,9 @@ function serviceRow(id, refresh) {
 
   const line = row([left, middle, right]);
   // Same shape the setup checklist and the runtime rows use: the bar belongs to
-  // the row doing the work, so nothing has to say which one it is measuring.
-  if (!busy) return line;
+  // the row doing the work, so nothing has to say which one it is measuring. A
+  // `quiet` step has no transfer behind it and spins the Install icon instead.
+  if (!busy || busy.quiet) return line;
   return h("div", { style: "display:flex;flex-direction:column;min-width:0" }, [
     line,
     progress(busy.pct),

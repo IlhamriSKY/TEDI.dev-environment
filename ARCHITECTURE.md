@@ -211,6 +211,43 @@ scheduler. And the schedule is a **real cron expression**, including the rule
 that makes cron cron: when both day fields are restricted, either one matching
 is a match.
 
+### 2.9 Handing the databases to another extension
+
+The host gives two extensions no way to talk, and that is not an oversight:
+`ctx.settings`, `ctx.events` and `ctx.secrets` all namespace their key under the
+id of whoever is CALLING, and `ctx.tabs.openExtensionTab` hard-wires
+`extensionId: ext.id`. So `tedi.devenv` cannot write into `tedi.sql-explorer`'s
+settings, cannot emit onto a channel it listens on, and cannot open its tab.
+Reaching around the host into the app's own settings file would work today,
+break on some later release, and walk backwards through a boundary that was put
+there on purpose.
+
+What is left is a file in the one place both sides can name without being
+configured: `~/.tedi/dev-environment.json`, the same `~/.tedi/<name>` convention
+`tedi.browser` uses for its own state. `manager/handoff.js` writes it from
+`applyRuntimeChange`, from a port edit, and once at activation.
+
+Three things make it a contract rather than a hack:
+
+- It states a **fact**, not a command. "These managed databases exist, reach
+  them here." The reader decides what to do with it, and nothing in it is
+  executed.
+- The record is **SQL Explorer's own connection shape**, so that side runs the
+  sanitiser its `.tedi-sql` import already has over these unchanged instead of
+  growing a second parser for the same thing. The reader treats the file as a
+  trust boundary exactly like an imported backup, because a file another program
+  writes is one whether it arrived on a USB stick or from an extension.
+- It carries **no password**, because there is none: `mysqld` is initialised
+  `--initialize-insecure` and `initdb` with `-A trust`, both bound to loopback.
+
+The file is deleted, not emptied, when the last database is removed: a reader
+cannot tell a stale offer from a stopped server.
+
+Only the address crosses. Everything else on a saved connection - the row limit,
+whether writes are allowed, a rename - belongs to whoever is using it, and
+losing that every launch because a port moved would make the handed-over row
+worse than one typed by hand.
+
 ## 3. Module map
 
 Every file stays under ~300 lines, fleet convention. As built, which is not
@@ -253,16 +290,17 @@ whole thing testable without a webview.
 
 | Permission                              | Why                                                   |
 | --------------------------------------- | ----------------------------------------------------- |
-| `invoke:shell_bg_spawn_direct`          | everything: curl, tar, version probes, and the         |
-|                                         | long-running services (nginx, mysql, php-cgi)          |
-| `invoke:shell_bg_logs/kill/list/remove` | reading that output back, and service supervision      |
-| `invoke:fs_*`                           | layout, config generation, reading archives back       |
-| `invoke:port_is_open`                   | port conflict detection (core already has it)          |
-| `terminal:path`                         | putting the shim directory first on the terminal PATH  |
-| `panels:register`, `tabs:open`          | the dashboard pane                                     |
-| `statusbar:write`                       | service status readout                                 |
-| `settings:read`, `settings:write`       | our own namespaced settings                            |
-| `ui:toast`                              | progress and failures                                  |
+| `invoke:shell_bg_spawn_direct`          | everything: curl, tar, version probes, and the        |
+|                                         | long-running services (nginx, mysql, php-cgi)         |
+| `invoke:shell_bg_logs/kill/list/remove` | reading that output back, and service supervision     |
+| `invoke:fs_*`                           | layout, config generation, reading archives back, and |
+|                                         | the one file outside the root: the database handoff   |
+| `invoke:port_is_open`                   | port conflict detection (core already has it)         |
+| `terminal:path`                         | putting the shim directory first on the terminal PATH |
+| `panels:register`, `tabs:open`          | the dashboard pane                                    |
+| `statusbar:write`                       | service status readout                                |
+| `settings:read`, `settings:write`       | our own namespaced settings                           |
+| `ui:toast`                              | progress and failures                                 |
 
 `invoke:shell_run_command` was declared too, for an `sh()` in `core/proc.js`
 kept "for the cases that genuinely need shell features". No such case ever
