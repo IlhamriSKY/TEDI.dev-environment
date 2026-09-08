@@ -128,34 +128,49 @@ export async function activate(context) {
   context.registerCommandHandler("tedi.devenv.stopAll", () => void stopAll());
 
   /**
-   * The status item: lit while anything is up, breathing while anything is
-   * still coming up.
+   * The status item.
    *
    * The host paints an extension's status icon in ONE colour and offers three
-   * states through `tone` - lit (`success`), breathing (`warning`), and a red
-   * dot (`error`). So the two little LEDs on the server glyph cannot be tinted
-   * or animated separately from here, however much they look like they were
-   * drawn for it: a `data:` SVG is rendered as a CSS mask, which is a shape
-   * painted in a single `background-color`, and nothing inside it animates.
+   * looks through `tone`: lit (`success`), breathing (`warning`), and a red dot
+   * beside it (`error`). So the two little LEDs on the server glyph cannot be
+   * lit separately however much they look like they were drawn for it - a
+   * `data:` SVG is rendered as a CSS mask, which is a shape painted in a single
+   * `background-color`, and nothing inside it carries its own colour or
+   * animation.
    *
-   * What that leaves is a real three-state readout rather than a decoration.
-   * Starting breathes, running is lit, nothing is dim - and dim is an answer,
-   * not an absence, because the icon is always there.
+   * Three looks, so three states worth telling apart - and each has to LAST
+   * long enough to be seen. Breathing was on "starting", which is a few hundred
+   * milliseconds and therefore never on screen; it is on downloading now, which
+   * is minutes. The precedence is what you would want at a glance: something in
+   * flight beats something broken beats something merely up.
    */
   const syncStatus = () => {
     const all = [...state.services.values()];
     const running = all.filter((s) => s.state === "running");
-    const starting = all.filter((s) => s.state === "starting");
-    const names = running.map((s) => provider(s.id)?.label ?? s.id);
+    const failed = all.filter((s) => s.state === "error");
+    const busy = [...state.busy.values()].filter((b) => !b.quiet);
+    const label = (/** @type {{ id: string }} */ s) => provider(s.id)?.label ?? s.id;
+
+    const tone = busy.length
+      ? "warning"
+      : failed.length
+        ? "error"
+        : running.length
+          ? "success"
+          : "default";
+    const tooltip = busy.length
+      ? `Dev Environment: ${busy[0].text}${busy[0].pct === undefined ? "" : ` ${busy[0].pct}%`}`
+      : failed.length
+        ? `Dev Environment: ${failed.map(label).join(", ")} failed`
+        : running.length
+          ? `Dev Environment: ${running.map(label).join(", ")} running`
+          : "Dev Environment: nothing running";
+
     context.statusBar.setItem({
       id: STATUS_ITEM,
       icon: "lucide:Server",
-      tone: starting.length > 0 ? "warning" : running.length > 0 ? "success" : "default",
-      tooltip: starting.length
-        ? `Dev Environment: starting ${starting.map((s) => provider(s.id)?.label ?? s.id).join(", ")}`
-        : running.length > 0
-          ? `Dev Environment: ${names.join(", ")} running`
-          : "Dev Environment: nothing running",
+      tone,
+      tooltip,
       onClick: open,
     });
   };

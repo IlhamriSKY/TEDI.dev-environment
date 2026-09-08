@@ -12,7 +12,7 @@ import { download as fetchFile } from "../core/net.js";
 import { extract, canExtract } from "../core/archive.js";
 import { mkdirp, move, remove, exists, singleRoot, subdirs, readDir, isDir } from "../core/fsx.js";
 import { run } from "../core/proc.js";
-import { isWindows, state, warn } from "../runtime.js";
+import { isWindows, warn, setBusy } from "../runtime.js";
 import { isSafeVersion } from "../registry/util.js";
 
 /** @typedef {import("../registry/index.js").Provider} Provider */
@@ -55,7 +55,7 @@ function isArchive(file) {
 export async function install(p, version, onProgress) {
   /** @param {string} m @param {number} [pct] */
   const say = (m, pct) => {
-    state.busy.set(p.id, { text: m, ...(pct === undefined ? {} : { pct }) });
+    setBusy(p.id, { text: m, ...(pct === undefined ? {} : { pct }) });
     onProgress?.(m, pct);
   };
 
@@ -151,7 +151,7 @@ export async function install(p, version, onProgress) {
     throw err instanceof Error ? err : new Error(String(err));
   } finally {
     await remove(archivePath).catch(() => {});
-    state.busy.delete(p.id);
+    setBusy(p.id, null);
   }
 }
 

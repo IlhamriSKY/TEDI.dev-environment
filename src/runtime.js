@@ -213,6 +213,22 @@ export function statusSignature() {
   return `${services}#${installed}#${busy}#${state.projects.length}#${state.cronRuns}`;
 }
 
+/**
+ * Record what a component is doing, or that it has finished.
+ *
+ * A funnel rather than nine `state.busy.set` calls, because anything watching
+ * "is this environment busy" has to be told - and the status bar is watching
+ * from outside every view, so it cannot learn it from a repaint.
+ *
+ * @param {string} id @param {import("./runtime.js").BusyState | null} busy
+ * @returns {void}
+ */
+export function setBusy(id, busy) {
+  if (busy === null) state.busy.delete(id);
+  else state.busy.set(id, busy);
+  state.onServices?.();
+}
+
 /** Re-render every mounted view. Safe to call when none are mounted. */
 export function repaint() {
   for (const view of state.views) {

@@ -14,7 +14,7 @@ import { installedOf } from "../manager/versions.js";
 import { activeVersion, setActiveVersion } from "../manager/config.js";
 import { install } from "../manager/install.js";
 import { applyRuntimeChange } from "../manager/apply.js";
-import { state, ctx, throttle } from "../runtime.js";
+import { ctx, throttle, setBusy } from "../runtime.js";
 
 /** @typedef {import("../registry/index.js").Provider} Provider */
 
@@ -38,7 +38,7 @@ export async function openInstaller(p, refresh) {
   // A sweeping bar is the shape of a download; this is one metadata request
   // that usually takes a few hundred milliseconds, and the honest signal for it
   // is the button you just pressed still working.
-  state.busy.set(p.id, { text: "Checking available versions", quiet: true });
+  setBusy(p.id, { text: "Checking available versions", quiet: true });
   refresh();
   const started = Date.now();
   try {
@@ -59,14 +59,14 @@ export async function openInstaller(p, refresh) {
       );
       return;
     }
-    state.busy.delete(p.id);
+    setBusy(p.id, null);
     refresh();
 
     const picked = await pickVersion(p, list);
     if (!picked) return;
 
     await install(p, picked, (text, pct) => {
-      state.busy.set(p.id, { text, ...(pct === undefined ? {} : { pct }) });
+      setBusy(p.id, { text, ...(pct === undefined ? {} : { pct }) });
       tick();
     });
     // Rescan BEFORE choosing a default: `setActiveVersion` records a version
@@ -80,7 +80,7 @@ export async function openInstaller(p, refresh) {
   } catch (err) {
     ctx?.ui.toast(err instanceof Error ? err.message : String(err), { variant: "error" });
   } finally {
-    state.busy.delete(p.id);
+    setBusy(p.id, null);
     refresh();
   }
 }

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.20
+
+- **The status icon's breathing state is one you can actually see.** It was on
+  "starting", which lasts a few hundred milliseconds and so was never on screen.
+  It is on downloading now, which is minutes. Four states, in the order you
+  would want them at a glance: something in flight breathes, something broken
+  shows a red dot, something merely running is lit, nothing is dim - and the
+  tooltip says which, including the download's own progress.
+
+  One funnel writes that progress, rather than the nine call sites that wrote it
+  before: the bar sits outside every view, so it cannot learn a download started
+  from a repaint, and a call site that forgot would silently stop the pulse.
+
 ## 0.1.19
 
 - **The status-bar icon reports three states, not two.** Breathing while a

@@ -27,7 +27,7 @@ import { installedOf } from "./versions.js";
 import { activeVersion, setActiveVersion } from "./config.js";
 import { install } from "./install.js";
 import { applyRuntimeChange } from "./apply.js";
-import { state } from "../runtime.js";
+import { setBusy } from "../runtime.js";
 
 /**
  * Components with an official build for Windows, macOS and Linux alike.
@@ -163,7 +163,7 @@ export async function installRecommended(say) {
     step++;
 
     try {
-      state.busy.set(p.id, { text: "Checking versions", step, total });
+      setBusy(p.id, { text: "Checking versions", step, total });
       say?.(`Looking up ${p.label}`);
       const version = await recommendedVersion(p.id);
       if (!version) {
@@ -174,7 +174,7 @@ export async function installRecommended(say) {
       // `install` already writes `state.busy`; this adds the batch position,
       // which only the batch knows.
       await install(p, version, (text, pct) => {
-        state.busy.set(p.id, { text, ...(pct === undefined ? {} : { pct }), step, total });
+        setBusy(p.id, { text, ...(pct === undefined ? {} : { pct }), step, total });
         say?.(`${p.label}: ${text}`);
       });
       await setActiveVersion(p.id, version);
@@ -186,7 +186,7 @@ export async function installRecommended(say) {
       if (/no prebuilt download for this platform/i.test(message)) unavailable.push(p.label);
       else failed.push({ id: p.label, error: message });
     } finally {
-      state.busy.delete(p.id);
+      setBusy(p.id, null);
     }
   }
 

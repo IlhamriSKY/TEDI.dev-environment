@@ -627,17 +627,43 @@ test("a service starting or stopping reaches the status bar", () => {
   );
 
   const index = readFileSync(new URL("./index.js", import.meta.url), "utf8");
-  // Three states, in the only vocabulary the host offers an extension icon:
-  // breathing while something is coming up, lit once it is, dim when nothing
-  // is. Per-dot colour is not on the list - see `syncStatus`.
+  // Each look has to last long enough to SEE. Breathing was on "starting",
+  // which is a few hundred milliseconds and therefore never on screen; it is on
+  // downloading, which is minutes. Per-dot colour is not on offer at all - see
+  // `syncStatus`.
+  // Whitespace-insensitive: prettier wraps this ternary as soon as it grows,
+  // and an assertion that breaks on reformatting is one nobody keeps.
   assert.match(
-    index,
-    /tone: starting\.length > 0 \? "warning" : running\.length > 0 \? "success" : "default"/,
-    "the status item no longer reports starting, running and idle as three states",
+    index.replace(/\s+/g, " "),
+    /busy\.length \? "warning" : failed\.length \? "error" : running\.length \? "success" : "default"/,
+    "the status item no longer distinguishes downloading, failed, running and idle",
+  );
+  assert.ok(
+    !/starting\.length/.test(index),
+    'the icon is tied to "starting" again, which never lasts long enough to be seen',
   );
   // A late callback firing into a torn-down context is the classic version of
   // this bug, and the one that survives a reload as a hard-to-place error.
   assert.match(index, /state\.onServices = null;/, "deactivate leaves the sync callback attached");
+});
+
+test("nothing writes busy behind the status bar's back", () => {
+  // The bar reads `state.busy` and is outside every view, so it cannot learn a
+  // download started from a repaint. One funnel, or the pulse silently stops
+  // appearing for whichever call site forgot.
+  for (const file of ["manager/install.js", "manager/defaults.js", "ui/version-picker.js"]) {
+    const src = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+    assert.ok(
+      !src.includes("state.busy.set") && !src.includes("state.busy.delete"),
+      `${file} writes state.busy directly; use setBusy so the status bar is told`,
+    );
+    assert.ok(src.includes("setBusy("), `${file} no longer reports progress at all`);
+  }
+  const rt = readFileSync(new URL("./runtime.js", import.meta.url), "utf8");
+  assert.ok(
+    /export function setBusy[\s\S]*state\.onServices\?\.\(\)/.test(rt),
+    "setBusy no longer tells the status bar",
+  );
 });
 
 console.log("\nwho is holding the port");
