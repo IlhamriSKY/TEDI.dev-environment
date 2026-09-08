@@ -179,9 +179,15 @@ function jobRow(job, refresh) {
     [
       icon("lucide:CalendarClock", enabled ? "var(--primary)" : "var(--muted-foreground)"),
       h("div", { style: "display:flex;flex-direction:column;gap:0;min-width:0" }, [
-        h("span", { style: "display:flex;align-items:center;gap:5px" }, [
+        h("span", { style: "display:flex;align-items:center;gap:5px;min-width:0" }, [
           status(enabled ? last.tone : "idle"),
-          h("span", { text: job.name, style: "font-size:12px;font-weight:600;line-height:1.35" }),
+          // `line-height:1`, as on a project row: at 1.35 the name's box is
+          // taller than the glyph's and centring the two boxes puts the text low.
+          h("span", {
+            text: job.name,
+            style:
+              "font-size:12px;font-weight:600;line-height:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap",
+          }),
         ]),
         muted(enabled ? last.text : "disabled"),
       ]),

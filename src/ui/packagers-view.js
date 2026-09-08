@@ -112,7 +112,10 @@ function packagerRow(p, nodeVersion, refresh) {
   return row([
     mark(markFor(p.id)),
     status(p.available ? "ok" : "idle"),
-    h("span", { text: p.label, style: "font-size:12px;font-weight:600;min-width:58px" }),
+    h("span", {
+      text: p.label,
+      style: "font-size:12px;font-weight:600;line-height:1;min-width:58px",
+    }),
     p.version ? pill(p.version) : null,
     muted(originLabel(p)),
     h("div", { style: "flex:1" }),

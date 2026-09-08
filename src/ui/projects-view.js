@@ -118,11 +118,16 @@ async function projectRow(project, refresh) {
     [
       icon("lucide:Folder", enabled ? "var(--primary)" : "var(--muted-foreground)"),
       h("div", { style: "display:flex;flex-direction:column;gap:0;min-width:0" }, [
-        h("span", { style: "display:flex;align-items:center;gap:5px" }, [
+        // `line-height:1` so the name's box hugs its glyphs. At 1.35 the box is
+        // 16px tall around 12px of text, and centring THAT against a 13px tick
+        // centres two boxes of different heights - which reads as the name
+        // sitting low, because it is.
+        h("span", { style: "display:flex;align-items:center;gap:5px;min-width:0" }, [
           status(enabled ? "ok" : "idle"),
           h("span", {
             text: project.name,
-            style: "font-size:12px;font-weight:600;line-height:1.35",
+            style:
+              "font-size:12px;font-weight:600;line-height:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap",
           }),
         ]),
         h("a", {

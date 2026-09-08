@@ -323,8 +323,15 @@ function tip(el, text) {
  * @returns {HTMLElement}
  */
 export function icon(name, colour, size = 15) {
+  // `align-items`/`justify-content` because the slot is a fixed box and the SVG
+  // dropped into it is whatever the host rendered. Without them the glyph is
+  // stretched or pinned to one corner rather than centred, and every row that
+  // puts text beside an icon inherits the offset - which is what made a project
+  // name sit low against its tick.
   const slot = h("span", {
-    style: `display:inline-flex;flex:none;width:${size}px;height:${size}px;color:${colour ?? "var(--muted-foreground)"}`,
+    style:
+      `display:inline-flex;align-items:center;justify-content:center;flex:none;` +
+      `width:${size}px;height:${size}px;color:${colour ?? "var(--muted-foreground)"}`,
   });
 
   const key = `${name}@${size}`;

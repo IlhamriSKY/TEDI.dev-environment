@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.21
+
+- **A name beside its status glyph sits level with it.** The project name read
+  low against its tick, and so did a scheduled job's. Two causes, both worth
+  fixing where they were rather than nudging a margin: an icon's slot is a fixed
+  box and the glyph the host renders into it was never centred inside it, so
+  every row that puts text next to an icon inherited the offset; and a bold name
+  carried `line-height: 1.35`, which is a 16px box around 12px of text - centring
+  that against a 13px glyph centres two boxes of different heights, and the text
+  is what looks wrong. A long name now truncates with an ellipsis instead of
+  pushing the row, too.
+
 ## 0.1.20
 
 - **The status icon's breathing state is one you can actually see.** It was on
