@@ -18,6 +18,7 @@ import { SHIMS, windowsShim, posixShim } from "./project/shims.js";
 import { plan } from "./core/archive.js";
 import { setCtx, setConfig, state } from "./runtime.js";
 import { startsWithAll } from "./manager/config.js";
+import { parseNetstat, parseTasklist, parseLsof, parseSs } from "./web/portowner.js";
 import { parseLoungeIndex } from "./registry/servers.js";
 import { matches, isValidSchedule, splitCommand } from "./manager/cron.js";
 import { loadModuleLines } from "./web/serverroot.js";
@@ -601,6 +602,68 @@ test("every Remove asks first", () => {
     );
     assert.ok(before.includes("if (!ok) return;"), `${file}: ${call} ignores the answer`);
   }
+});
+
+console.log("\nwho is holding the port");
+
+// "Port 80 is already in use" is true and useless. Naming the process is the
+// whole difference between a dead end and one button, and the naming is four
+// text parsers against four tools whose output nobody here controls - so they
+// are pure functions checked against REAL output, captured from the machines
+// this runs on rather than written from memory of the man page.
+
+test("netstat: the LISTENING row for the port, and only that row", () => {
+  // Captured from `netstat -ano -p TCP` on Windows 11.
+  const out = [
+    "",
+    "Active Connections",
+    "",
+    "  Proto  Local Address          Foreign Address        State           PID",
+    "  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1520",
+    "  TCP    0.0.0.0:7680           0.0.0.0:0              LISTENING       3176",
+    "  TCP    127.0.0.1:80           0.0.0.0:0              LISTENING       9012",
+    // An outbound connection FROM 80 is not what blocks a bind. Matching it
+    // would offer to kill a browser.
+    "  TCP    192.168.1.5:52210      93.184.216.34:80       ESTABLISHED     4444",
+    "  TCP    [::]:7680              [::]:0                 LISTENING       3176",
+  ].join("\r\n");
+
+  assert.equal(parseNetstat(out, 7680), 3176);
+  assert.equal(parseNetstat(out, 80), 9012, "a loopback-only listener still holds the port");
+  assert.equal(parseNetstat(out, 135), 1520);
+  assert.equal(parseNetstat(out, 4444), null, "an ESTABLISHED row must never match");
+  assert.equal(parseNetstat(out, 3306), null);
+
+  // IPv6: splitting on the FIRST colon takes the whole address and every row
+  // parses as NaN.
+  const v6 = "  TCP    [::]:443               [::]:0                 LISTENING       2200";
+  assert.equal(parseNetstat(v6, 443), 2200, "an IPv6 local address must still yield its port");
+});
+
+test("tasklist: the image name out of the CSV row", () => {
+  // Captured from `tasklist /FI "PID eq 3176" /FO CSV /NH`.
+  assert.equal(parseTasklist('"svchost.exe","3176","Services","0","25.624 K"'), "svchost.exe");
+  assert.equal(parseTasklist('"php-cgi.exe","880","Console","1","9,120 K"'), "php-cgi.exe");
+  // A pid with no process answers with a sentence, not a row.
+  assert.equal(
+    parseTasklist("INFO: No tasks are running which match the specified criteria."),
+    null,
+  );
+  assert.equal(parseTasklist(""), null);
+});
+
+test("lsof and ss name the process on the other two platforms", () => {
+  // `lsof -nP -iTCP:80 -sTCP:LISTEN -F pc`
+  assert.deepEqual(parseLsof("p1234\ncnginx\np1235\ncnginx\n"), { pid: 1234, name: "nginx" });
+  // A pid with no command line still gets acted on.
+  assert.deepEqual(parseLsof("p1234\n"), { pid: 1234, name: "?" });
+  assert.equal(parseLsof(""), null);
+
+  // `ss -H -ltnp 'sport = :80'`
+  const ss =
+    'LISTEN 0      511          0.0.0.0:80        0.0.0.0:*    users:(("nginx",pid=1234,fd=6))';
+  assert.deepEqual(parseSs(ss), { pid: 1234, name: "nginx" });
+  assert.equal(parseSs("LISTEN 0 511 0.0.0.0:80 0.0.0.0:*"), null, "no users: column, no owner");
 });
 
 console.log("\nwhat Start all starts");

@@ -76,6 +76,15 @@ export function setConfig(patch) {
  * @property {number | null} port
  * @property {string | null} error
  * @property {string | null} version
+ * @property {number | null} [adopted]  The pid of a process this extension
+ *   started before a crash and has taken back over. There is no host-side
+ *   handle for it - handles die with the app - so stopping it and checking it
+ *   is alive both go through the pid instead.
+ * @property {{ port: number, pid: number, name: string } | null} [conflict]
+ *   Set when the start failed because something else holds the port, so the row
+ *   can offer to free it. On the STATUS rather than parsed back out of `error`:
+ *   a message is for a person to read, and matching on one is how a reworded
+ *   sentence quietly removes a button.
  */
 
 /**

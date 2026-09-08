@@ -21,6 +21,7 @@ import {
   dropdown,
   checkbox,
   modal,
+  confirm,
 } from "./el.js";
 import { markFor } from "./marks.js";
 import { provider } from "../registry/index.js";
@@ -45,6 +46,7 @@ import {
   setStartsWithAll,
 } from "../manager/config.js";
 import { publishHandoff } from "../manager/handoff.js";
+import { freePort } from "../web/portowner.js";
 import { publish } from "../web/publish.js";
 import { openCron } from "./cron-view.js";
 import { openInstaller } from "./version-picker.js";
@@ -205,6 +207,54 @@ function rowTick(id, refresh) {
       attrs: { "aria-label": web ? `Serve with ${id}` : `Start all includes ${id}` },
     },
     [box],
+  );
+}
+
+/**
+ * Stop whatever is holding the port, then start this service.
+ *
+ * Behind a confirmation naming the process and its pid, because it ends
+ * somebody's program - possibly one they meant to be running. The button only
+ * exists when the OS told us what that program is, so the dialog can always say
+ * what is about to be stopped.
+ *
+ * @param {string} id
+ * @param {{ port: number, pid: number, name: string }} conflict
+ * @param {() => void} refresh
+ * @returns {HTMLElement}
+ */
+function freeButton(id, conflict, refresh) {
+  return button(
+    `Stop ${conflict.name}`,
+    async () => {
+      const ok = await confirm({
+        title: `Stop ${conflict.name}?`,
+        description:
+          `Process ${conflict.pid} is listening on port ${conflict.port}. Stopping it frees the ` +
+          `port so ${provider(id)?.label ?? id} can bind, and ends whatever that program was doing.`,
+        confirmLabel: "Stop it",
+        icon: "lucide:CircleStop",
+      });
+      if (!ok) return;
+      const res = await freePort(conflict, conflict.port);
+      if (!res.ok) {
+        ctx?.ui.toast(res.message ?? `Port ${conflict.port} is still in use.`, {
+          variant: "error",
+        });
+        refresh();
+        return;
+      }
+      // Freed it because this service wanted it, so try again rather than
+      // making the user press Start as a second step.
+      const s = await start(id);
+      if (s.state === "error" && s.error) ctx?.ui.toast(s.error, { variant: "error" });
+      refresh();
+    },
+    {
+      variant: "danger",
+      icon: "lucide:CircleStop",
+      title: `Stop pid ${conflict.pid} and start ${provider(id)?.label ?? id} on port ${conflict.port}`,
+    },
   );
 }
 
@@ -382,7 +432,7 @@ function portField(value, placeholder, commit) {
     },
     placeholder,
   );
-  field.style.width = "76px";
+  field.style.width = "104px";
   field.style.textAlign = "center";
   return field;
 }
@@ -481,6 +531,10 @@ function serviceRow(id, refresh) {
             style: "color:var(--destructive);font-size:11px;line-height:1.4",
           })
         : null,
+      // The one error with an action behind it. Offered only when the OS
+      // actually named the process: "stop whatever has port 80" is not
+      // something anyone should be asked to press blind.
+      st?.conflict ? freeButton(id, st.conflict, refresh) : null,
     ],
   );
 

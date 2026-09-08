@@ -15,7 +15,7 @@ import { ensureDirs } from "./core/fsx.js";
 import { layoutDirs } from "./core/paths.js";
 import { scanInstalled } from "./manager/versions.js";
 import { sweepDownloads } from "./manager/install.js";
-import { refreshStatuses, startAll, stopAll } from "./manager/services.js";
+import { refreshStatuses, startAll, stopAll, recoverRunning } from "./manager/services.js";
 import { loadProjects, refreshAllRuntimes } from "./project/projects.js";
 import { writeShims, shimDir } from "./project/shims.js";
 import { migrateLayout, legacyShimDir } from "./manager/migrate.js";
@@ -94,6 +94,15 @@ export async function activate(context) {
     // Same reason: a database installed before this existed was never published
     // to anyone, and the reader only ever looks at the file.
     await publishHandoff();
+    // Anything still running from before a crash is taken back over rather than
+    // reported as stopped and then failing to start on its own port.
+    const recovered = await recoverRunning();
+    if (recovered > 0) {
+      context.ui.toast(
+        `${recovered} service${recovered === 1 ? "" : "s"} ${recovered === 1 ? "was" : "were"} still running and ${recovered === 1 ? "has" : "have"} been taken back over.`,
+        { variant: "info" },
+      );
+    }
   } catch (err) {
     // Surfaced on the setup screen rather than swallowed, because the panel is
     // about to render a checklist and "root folder" is the step that fixes it.

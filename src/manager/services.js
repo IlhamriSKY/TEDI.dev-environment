@@ -12,7 +12,7 @@
 // real data in, and it should happen when they first ask for the service, not
 // as a side effect of downloading it.
 
-import { paths, join } from "../core/paths.js";
+import { paths, join, samePath } from "../core/paths.js";
 import { exists, mkdirp, readDir, writeText } from "../core/fsx.js";
 import { spawn, kill, run, isAlive, sleep, logs } from "../core/proc.js";
 import { state, config, isWindows, exeSuffix, warn, repaint } from "../runtime.js";
@@ -21,6 +21,7 @@ import { activeVersion, startsWithAll } from "./config.js";
 import { fastcgiPort, generate } from "../web/vhost.js";
 import { phpFastCgi } from "../registry/php.js";
 import { plannedPort, portIsPinned, isWebServer, inUse, findFree } from "../web/ports.js";
+import { portOwner, processPath, killPid } from "../web/portowner.js";
 import { serverExe } from "../web/serverroot.js";
 import { startCron, stopCron, isRunning as isCronRunning } from "./cron.js";
 
@@ -115,7 +116,7 @@ export async function start(id) {
     });
   }
 
-  setStatus(id, { state: "starting", error: null, version: row.version });
+  setStatus(id, { state: "starting", error: null, conflict: null, version: row.version });
 
   try {
     const port = await choosePort(id);
@@ -146,7 +147,10 @@ export async function start(id) {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     warn(`could not start ${id}:`, message);
-    return setStatus(id, { state: "error", error: message, handle: null });
+    const conflict =
+      /** @type {{ conflict?: { port: number, pid: number, name: string } }} */ (err)?.conflict ??
+      null;
+    return setStatus(id, { state: "error", error: message, handle: null, conflict });
   }
 }
 
@@ -181,6 +185,10 @@ export async function stop(id) {
   }
 
   if (s.handle !== null) await kill(s.handle);
+  // Adopted after a crash: the handle died with the app that owned it, so the
+  // pid is the only way to reach the process. The graceful path above has
+  // usually already stopped a web server by here; this is what stops a database.
+  else if (s.adopted) await killPid(s.adopted);
 
   // Wait for the port to actually go quiet, for EVERY service that had one.
   //
@@ -247,9 +255,21 @@ async function choosePort(id) {
   // thing the choice was made for. Starting anyway fails with an opaque bind
   // error deep in a log file, so say it here instead.
   if (portIsPinned(id)) {
-    throw new Error(
-      `Port ${wanted} is already in use. Stop whatever is serving it, or give ${id} a different port.`,
+    // Ask WHO. "Port 80 is already in use" is true and useless; nine times in
+    // ten it is another copy of the same server, and naming it is the whole
+    // difference between a dead end and one button.
+    const owner = await portOwner(wanted);
+    const err = new Error(
+      owner
+        ? `Port ${wanted} is already in use by ${owner.name} (pid ${owner.pid}).`
+        : `Port ${wanted} is already in use. Stop whatever is serving it, or give ${id} a different port.`,
     );
+    if (owner) {
+      // Carried on the error so `start`'s catch can put it on the status, which
+      // is where the row reads it from.
+      Object.assign(err, { conflict: { port: wanted, pid: owner.pid, name: owner.name } });
+    }
+    throw err;
   }
 
   const taken = new Set(
@@ -524,10 +544,94 @@ export async function refreshStatuses() {
       continue;
     }
     const s = statusOf(id);
-    if (s.state === "running" && s.handle !== null && !(await isAlive(s.handle))) {
-      setStatus(id, { state: "stopped", handle: null });
+    if (s.state !== "running") continue;
+    if (s.handle !== null) {
+      if (!(await isAlive(s.handle))) setStatus(id, { state: "stopped", handle: null });
+      continue;
+    }
+    // Adopted, so there is no handle to ask. The port is the liveness check:
+    // without this an adopted service would read "running" forever, including
+    // after somebody stopped it from outside.
+    if (s.adopted && s.port !== null && !(await inUse(s.port))) {
+      setStatus(id, { state: "stopped", adopted: null });
     }
   }
+}
+
+/**
+ * Take back over anything still running from before a crash.
+ *
+ * TEDI closing normally stops these; TEDI being killed does not, on the
+ * platforms where a child outlives its parent. The symptom is a dashboard
+ * saying "stopped" over a MySQL that is very much running, and a Start that
+ * then fails with "port 3306 is already in use" - blaming a conflict on the
+ * user's own previous session.
+ *
+ * Adoption is only ever offered on PROOF, never on a guess: something is
+ * listening on the port this service would use, and the process holding it is
+ * running the exact binary this service would have launched. A name match would
+ * not do - plenty of people have their own nginx - because the consequence of
+ * being wrong is a Stop button that kills a server this extension never
+ * started.
+ *
+ * Cheap when there is nothing to recover, which is the normal case: a loopback
+ * connect per installed service, and the two subprocesses that identify a
+ * process only run when something actually answered.
+ *
+ * @returns {Promise<number>} How many were taken back over.
+ */
+export async function recoverRunning() {
+  let found = 0;
+  for (const id of SERVICE_IDS) {
+    // The scheduler is a timer inside this extension. Nothing of it survives
+    // the process that was running it, so there is nothing to adopt.
+    if (IN_PROCESS.has(id)) continue;
+    if (statusOf(id).state === "running") continue;
+
+    const row = resolveVersion(id, activeVersion(id) ?? installedOf(id)[0]?.version ?? null);
+    if (!row) continue;
+
+    const port = plannedPort(id);
+    if (!(await inUse(port))) continue;
+
+    const owner = await portOwner(port);
+    if (!owner) continue;
+
+    const path = await processPath(owner.pid);
+    if (!path || !(await isOurBinary(id, row, path))) continue;
+
+    setStatus(id, {
+      state: "running",
+      handle: null,
+      adopted: owner.pid,
+      port,
+      error: null,
+      conflict: null,
+      version: row.version,
+    });
+    warn(`recovered ${id} (pid ${owner.pid}) still running on port ${port}`);
+    found++;
+  }
+  return found;
+}
+
+/**
+ * Is `path` the executable this service would have launched?
+ *
+ * Compared through `samePath`, which folds case on Windows and normalises
+ * separators: `netstat` and `Get-Process` disagree with our own `join` about
+ * both, and a string comparison would decline to adopt a process that is
+ * plainly ours.
+ *
+ * @param {string} id
+ * @param {import("../runtime.js").InstalledVersion} row
+ * @param {string} path
+ * @returns {Promise<boolean>}
+ */
+async function isOurBinary(id, row, path) {
+  const plan = await planFor(id, row, 0).catch(() => null);
+  if (!plan) return false;
+  return samePath(plan.program, path);
 }
 
 /** Stop everything this extension started. Called on deactivate.

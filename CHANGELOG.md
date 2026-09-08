@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.1.16
+
+- **"Port 80 is already in use" now says by what, and offers to stop it.** That
+  sentence was true and useless: it named the problem and nothing you could act
+  on. The pane asks the operating system which process is listening - `netstat`
+  and `tasklist` on Windows, `lsof` or `ss` elsewhere - and puts the name and
+  pid in the message. Beside it is a button that stops that process and starts
+  the service, behind a confirmation naming exactly what is about to be ended.
+  The button only exists when the OS actually named the process, because "stop
+  whatever has port 80" is not something anyone should press blind. Stopping is
+  attempted as you first, and only escalates to administrator rights if that is
+  refused.
+
+- **Recovery after a crash.** TEDI closing normally stops these services; TEDI
+  being killed does not, on the platforms where a child outlives its parent.
+  The symptom was a dashboard reading "stopped" over a MySQL that was very much
+  running, and a Start that then failed on its own port. Anything still up is
+  taken back over at launch, and can be stopped from the pane as usual even
+  though the handle that owned it died with the app.
+
+  Adoption is only ever on proof, never on a guess: something is listening on
+  the port the service would use, **and** the process holding it is running the
+  exact binary the service would have launched. A name match would not do -
+  plenty of people have their own nginx - because the cost of being wrong is a
+  Stop button that kills a server this extension never started.
+
+- **The port field in the settings dialog is wider.**
+
 ## 0.1.15
 
 - **One tick per row, meaning the same thing everywhere.** It says what **Start

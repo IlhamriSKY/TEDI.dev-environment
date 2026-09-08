@@ -54,6 +54,13 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
   comes up because you pressed Start all is the one that surprises you.
 - **Databases as services.** MySQL, PostgreSQL and Redis start, stop and
   initialise their data directories from the dashboard.
+- **A port conflict names the culprit.** "Port 80 is already in use" tells you
+  nothing you can act on, so the row says which process holds it and offers to
+  stop it - behind a confirmation naming exactly what is about to end.
+- **Services survive a crash of the app.** Anything still running is taken back
+  over at launch instead of being reported as stopped, so you do not start it
+  twice. Only on proof: the process holding the port has to be running the exact
+  binary this environment would have launched.
 - **The databases show up in SQL Explorer by themselves.** Install MySQL or
   PostgreSQL here and, if you have the
   [SQL Explorer](https://github.com/IlhamriSKY/tedi.sql-explorer) extension,

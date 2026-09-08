@@ -41,7 +41,7 @@ import { writeShims } from "./project/shims.js";
 import { writeGlobalEnv, applyRuntimeChange } from "./manager/apply.js";
 import { generate } from "./web/vhost.js";
 import { serverExe } from "./web/serverroot.js";
-import { start, stop } from "./manager/services.js";
+import { start, stop, recoverRunning } from "./manager/services.js";
 import { inUse } from "./web/ports.js";
 import { run, sleep } from "./core/proc.js";
 import { ensureDirs } from "./core/fsx.js";
@@ -544,6 +544,90 @@ await step("only one web server runs: starting one stops the other", async () =>
 // the generated shim, `global.env`, `programFor`, and the host's willingness to
 // spawn a `.cmd` - and any one of them being wrong produces a job that either
 // runs the wrong runtime or does not run at all.
+// Recovery after a crash, which cannot be reasoned about: it depends on whether
+// a spawned child outlives the process that started it, on what the OS reports
+// as holding the port, and on whether the executable path it reports matches the
+// one we would have launched closely enough to compare. All three are answered
+// by driving it.
+//
+// The crash is simulated exactly as the extension experiences one: the process
+// keeps running and the in-memory handle is gone. Nothing else about a relaunch
+// is different.
+await step("a service still running after a crash is taken back over", async () => {
+  if (installedOf("nginx").length === 0) return;
+  setConfig({ webServer: "nginx", httpPort: 18080, httpsPort: 18443, autoHttps: false });
+
+  const started = await start("nginx");
+  if (started.state !== "running") {
+    throw new Error(`nginx did not start: ${started.error ?? "no reason given"}`);
+  }
+  await sleep(600);
+
+  try {
+    // The crash. The process lives; every trace of it in this extension does not.
+    state.services.clear();
+    if (!(await inUse(18080))) {
+      // Nothing survived, so there is nothing to recover and nothing to check.
+      // That is the correct outcome on a platform that kills children with
+      // their parent, not a failure of this code.
+      console.log("        the child did not outlive its parent here; nothing to adopt");
+      return;
+    }
+
+    const found = await recoverRunning();
+    if (found !== 1) throw new Error(`recovered ${found} services, expected 1`);
+
+    const st = state.services.get("nginx");
+    if (st?.state !== "running") throw new Error(`nginx reads "${st?.state}" after recovery`);
+    if (st.port !== 18080) throw new Error(`recovered on port ${st.port}, expected 18080`);
+    if (!st.adopted) throw new Error("recovered without a pid, so Stop could never reach it");
+    if (st.handle !== null) throw new Error("an adopted service must have no host handle");
+
+    // A second pass must not re-adopt what is already running, or every launch
+    // would toast about services it recovered from itself.
+    if ((await recoverRunning()) !== 0) throw new Error("re-adopted a service already running");
+
+    // And the whole point: it can be stopped without the handle it lost.
+    await stop("nginx");
+    if (await inUse(18080)) throw new Error("an adopted service could not be stopped");
+    console.log(`        adopted nginx (pid ${st.adopted}) on :18080, and stopped it again`);
+  } finally {
+    await stop("nginx").catch(() => {});
+  }
+});
+
+// Something ELSE on the port is never adopted. The consequence of getting this
+// wrong is a Stop button that kills a server this extension did not start, so
+// the check is that a real listener we did not launch is left alone.
+await step("a port held by something else is not adopted", async () => {
+  if (installedOf("nginx").length === 0) return;
+  setConfig({ webServer: "nginx", httpPort: 18081, httpsPort: 18443, autoHttps: false });
+  state.services.clear();
+
+  // A listener that is plainly not ours: node itself.
+  const intruder = spawn(
+    process.execPath,
+    [
+      "-e",
+      "require('net').createServer().listen(18081, '127.0.0.1', () => setInterval(() => {}, 1e9))",
+    ],
+    { stdio: "ignore" },
+  );
+  try {
+    for (let i = 0; i < 25 && !(await inUse(18081)); i++) await sleep(200);
+    if (!(await inUse(18081))) throw new Error("the stand-in listener never came up");
+
+    const found = await recoverRunning();
+    if (found !== 0) throw new Error("adopted a process this extension never started");
+    if (state.services.get("nginx")?.state === "running") {
+      throw new Error("nginx was marked running because something else held its port");
+    }
+    console.log("        left a listener we did not start alone");
+  } finally {
+    intruder.kill();
+  }
+});
+
 await step("a scheduled job runs the runtime the shim resolves", async () => {
   const installed = installedOf("node").find((r) => r.origin === "download");
   if (!installed) throw new Error("no managed node to resolve to");
