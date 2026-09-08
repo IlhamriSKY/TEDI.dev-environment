@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.13
+
+- **No console window flashes over the app.** Everything this extension spawns
+  goes through the host, which sets `CREATE_NO_WINDOW`, with exactly one
+  exception: the elevated step that writes the hosts file. It is started with
+  the `RunAs` verb, which goes out through ShellExecute into a brand new
+  process that inherits none of that, so adding a project flashed a full
+  PowerShell window while it wrote three lines. It is hidden now. The
+  administrator prompt still appears, and should: that is the part you are
+  meant to see and agree to.
+
+- **Switching web server, or changing a port, no longer asks for administrator
+  rights.** The hosts file holds one thing: project domains pointed at
+  127.0.0.1. Which server serves them, on which port, over HTTP or HTTPS, is
+  not in it. Every publish from the Services section skipped straight past that
+  and asked for a hosts sync anyway, so pressing **Use this** could raise a UAC
+  prompt that the thing you pressed cannot explain. Adding, removing, renaming
+  or disabling a project still syncs, because those are the changes the file
+  actually records.
+
 ## 0.1.12
 
 - **One loading glyph, everywhere.** The pane had three ideas of "working" at

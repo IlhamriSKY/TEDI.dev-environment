@@ -70,6 +70,14 @@ export async function elevate(lines, opts = {}) {
  * who declines the prompt makes Start-Process throw, which surfaces as a
  * non-zero exit here rather than a silent no-op.
  *
+ * `-WindowStyle Hidden` because this was the ONE process in the extension that
+ * showed a console. Everything else is spawned through `shell_bg_spawn_direct`,
+ * which sets `CREATE_NO_WINDOW`, but `-Verb RunAs` goes out through
+ * ShellExecute and starts a brand new process that inherits none of that - so
+ * adding a project flashed a full PowerShell window over the app while it wrote
+ * three lines to the hosts file. The UAC prompt still appears, and should: that
+ * is the part the user has to see and agree to.
+ *
  * @param {string} file @param {string[]} lines
  * @returns {Promise<ElevateResult>}
  */
@@ -87,7 +95,7 @@ async function elevateWindows(file, lines) {
       "-NoProfile",
       "-NonInteractive",
       "-Command",
-      `$p = Start-Process powershell -Verb RunAs -Wait -PassThru -ArgumentList '${inner}'; exit $p.ExitCode`,
+      `$p = Start-Process powershell -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList '${inner}'; exit $p.ExitCode`,
     ],
     { timeoutMs: 5 * 60_000 },
   );

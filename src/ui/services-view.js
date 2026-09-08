@@ -117,7 +117,8 @@ function versionPicker(id, installed, refresh) {
     async (version) => {
       await setActiveVersion(id, version);
       await applyRuntimeChange();
-      if (isWebServer(id)) await publish().catch(() => {});
+      // Same reason as every other publish in this view: see `useWebServer`.
+      if (isWebServer(id)) await publish({ hosts: false }).catch(() => {});
       refresh();
     },
     { width: "112px" },
@@ -137,7 +138,12 @@ async function useWebServer(id, refresh) {
   const other = id === "nginx" ? "apache" : "nginx";
   const wasRunning = state.services.get(other)?.state === "running";
   await writeSetting("webServer", id);
-  await publish().catch(() => {});
+  // `hosts: false`. Which server serves is not something the hosts file
+  // records - it holds project domains pointed at 127.0.0.1, and both servers
+  // answer on the same address. Publishing WITH the sync meant switching from
+  // Apache to nginx could raise an administrator prompt, which is a
+  // frightening thing to be asked for pressing "Use this".
+  await publish({ hosts: false }).catch(() => {});
   if (wasRunning) {
     const s = await start(id);
     if (s.state === "error" && s.error) ctx?.ui.toast(s.error, { variant: "error" });
@@ -167,7 +173,8 @@ function portControls(id, st, live, refresh) {
   const box = checkbox(https);
   box.addEventListener("click", async () => {
     await writeSetting("autoHttps", !https);
-    await publish().catch(() => {});
+    // No domain changes when HTTPS goes off; only the vhosts do.
+    await publish({ hosts: false }).catch(() => {});
     refresh();
   });
 
@@ -211,7 +218,8 @@ function httpsPortField(live, refresh) {
         return;
       }
       await writeSetting("httpsPort", next);
-      await publish().catch(() => {});
+      // A port lives in the vhost, never in the hosts file.
+      await publish({ hosts: false }).catch(() => {});
       refresh();
     },
     "443",
@@ -259,8 +267,9 @@ function portControl(id, st, live, refresh) {
       if (isWebServer(id)) await writeSetting("httpPort", next ?? 80);
       else await setServicePort(id, next);
       // A generated vhost carries the web server's port in its `listen` lines,
-      // so a port change is a republish and not just a stored number.
-      await publish().catch(() => {});
+      // so a port change is a republish and not just a stored number - but the
+      // hosts file holds domains, not ports, so it is not a hosts sync.
+      await publish({ hosts: false }).catch(() => {});
       // And a database's port is in the connection another extension was
       // handed, so that is a republish too.
       await publishHandoff();

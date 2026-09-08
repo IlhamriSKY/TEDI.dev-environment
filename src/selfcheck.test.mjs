@@ -602,6 +602,50 @@ test("every Remove asks first", () => {
   }
 });
 
+console.log("\nasking for administrator rights");
+
+// The hosts file is the only thing here that needs elevation, and it holds ONE
+// thing: project domains pointed at 127.0.0.1. So an action that cannot change
+// the project set must not trigger a sync. Switching from Apache to nginx
+// raising a UAC prompt is a frightening thing to be asked for pressing "Use
+// this", and the prompt cannot even be explained by what was pressed.
+
+test("only a change to the projects can ask for administrator rights", () => {
+  const server = readFileSync(new URL("./ui/services-view.js", import.meta.url), "utf8");
+  let at = server.indexOf("publish(");
+  assert.ok(at > 0, "services-view no longer publishes at all");
+  while (at >= 0) {
+    assert.ok(
+      server.startsWith("publish({ hosts: false })", at),
+      `services-view.js: a publish() at index ${at} still syncs the hosts file; ` +
+        "nothing in that view changes a project domain",
+    );
+    at = server.indexOf("publish(", at + 1);
+  }
+
+  // And the views that DO change domains must still sync, or a new project
+  // resolves nowhere.
+  for (const file of ["ui/projects-view.js", "ui/settings-view.js"]) {
+    const src = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+    assert.match(
+      src,
+      /await publish\(\)/,
+      `${file} never syncs the hosts file, so its domains would resolve nowhere`,
+    );
+  }
+});
+
+test("the elevated window is hidden, and the prompt is not", () => {
+  const src = readFileSync(new URL("./core/elevate.js", import.meta.url), "utf8");
+  // Everything else is spawned with CREATE_NO_WINDOW by the host; `-Verb RunAs`
+  // goes out through ShellExecute and inherits none of it.
+  assert.ok(
+    src.includes("-Verb RunAs -WindowStyle Hidden"),
+    "the elevated PowerShell would flash a console window over the app",
+  );
+  assert.ok(src.includes("-Verb RunAs"), "the elevation no longer asks for administrator rights");
+});
+
 console.log('\none way to say "working"');
 
 // The pane had THREE ideas of it at once: a breathing ring on a service row, a
