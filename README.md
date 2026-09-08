@@ -39,13 +39,17 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
 - **Every service can install another version**, from its own row: the same
   dropdown-and-Install pair the runtimes have. Nginx, Apache, MySQL, PostgreSQL
   and Redis are versioned downloads like PHP and Node.
-- **Every port is editable, and HTTPS can be switched off.** The port sits on
-  the row as a field while the service is stopped and as a label once it is
-  bound. A web server shows both its ports, and the tick beside `https` turns it
-  off entirely — no certificates issued, no SSL block in the vhosts — for the
-  plenty of local work that never touches it. A port you type is never moved out
-  from under you: if something else has it, the row says so rather than quietly
-  landing on the next one along.
+- **Every port is editable, and HTTPS can be switched off**, behind the gear on
+  the service's own row. The row keeps the port as a fact, because the number is
+  worth a glance even when you are not changing it. A web server has two, and
+  the HTTPS switch turns the second off entirely - no certificates issued, no
+  SSL block in the vhosts - for the plenty of local work that never touches it.
+  A port you type is never moved out from under you: if something else has it,
+  the row says so rather than quietly landing on the next one along.
+- **Start all starts what you tick.** Two databases run side by side happily,
+  and most people want one, so each service row carries a tick that decides
+  whether **Start all** includes it. Its own Start button always works either
+  way.
 - **Databases as services.** MySQL, PostgreSQL and Redis start, stop and
   initialise their data directories from the dashboard.
 - **The databases show up in SQL Explorer by themselves.** Install MySQL or

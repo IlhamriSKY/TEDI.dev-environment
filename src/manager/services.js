@@ -17,7 +17,7 @@ import { exists, mkdirp, readDir, writeText } from "../core/fsx.js";
 import { spawn, kill, run, isAlive, sleep, logs } from "../core/proc.js";
 import { state, config, isWindows, exeSuffix, warn, repaint } from "../runtime.js";
 import { installedOf, resolveVersion } from "./versions.js";
-import { activeVersion } from "./config.js";
+import { activeVersion, startsWithAll } from "./config.js";
 import { fastcgiPort, generate } from "../web/vhost.js";
 import { phpFastCgi } from "../registry/php.js";
 import { plannedPort, portIsPinned, isWebServer, inUse, findFree } from "../web/ports.js";
@@ -564,6 +564,11 @@ export async function startAll() {
     if (isWebServer(id)) continue;
     // Nothing to install means the check below would skip it every time.
     if (!IN_PROCESS.has(id) && installedOf(id).length === 0) continue;
+    // Unticked on its row. Starting everything installed was the right default
+    // and the wrong rule: MySQL and PostgreSQL run side by side happily, and
+    // most people use one, so "Start all" was starting a second database nobody
+    // asked for and holding its port.
+    if (!startsWithAll(id)) continue;
     await start(id).catch(() => {});
   }
 }

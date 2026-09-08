@@ -31,6 +31,10 @@ export function setCtx(value) {
  * @property {Record<string, string>} defaults  Global active version per runtime id.
  * @property {Record<string, number>} ports  Port a service was explicitly given,
  *   per id. Absent means "the conventional default for that service".
+ * @property {Record<string, boolean>} autostart  Whether "Start all" brings a
+ *   service up, per id. ABSENT MEANS YES: an environment configured before this
+ *   existed keeps starting everything it used to, and a fresh install starts
+ *   what it installed. Only ever written by unticking something.
  * @property {boolean} skipTerminalPath  The user chose to leave the terminal
  *   PATH alone. Their decision, remembered, not a step still outstanding.
  */
@@ -46,6 +50,7 @@ export const config = {
   manageHosts: true,
   defaults: {},
   ports: {},
+  autostart: {},
   skipTerminalPath: false,
 };
 

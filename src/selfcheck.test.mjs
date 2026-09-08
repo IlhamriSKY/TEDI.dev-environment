@@ -17,6 +17,7 @@ import { renderHosts, MARKERS } from "./web/hosts.js";
 import { SHIMS, windowsShim, posixShim } from "./project/shims.js";
 import { plan } from "./core/archive.js";
 import { setCtx, setConfig, state } from "./runtime.js";
+import { startsWithAll } from "./manager/config.js";
 import { parseLoungeIndex } from "./registry/servers.js";
 import { matches, isValidSchedule, splitCommand } from "./manager/cron.js";
 import { loadModuleLines } from "./web/serverroot.js";
@@ -600,6 +601,48 @@ test("every Remove asks first", () => {
     );
     assert.ok(before.includes("if (!ok) return;"), `${file}: ${call} ignores the answer`);
   }
+});
+
+console.log("\nwhat Start all starts");
+
+// Two databases run side by side perfectly happily, which is exactly the
+// problem: "Start all" started every one that was installed, so anyone who had
+// tried both ended up with a second database running and holding its port every
+// time they pressed it. The tick is per service, and ABSENT MEANS YES so an
+// environment configured before this existed starts what it always did.
+
+test("Start all includes a service until it is unticked", () => {
+  setConfig({ autostart: {} });
+  assert.equal(startsWithAll("mysql"), true, "absent must mean included");
+
+  setConfig({ autostart: { mysql: false } });
+  assert.equal(startsWithAll("mysql"), false, "an unticked service must be skipped");
+  assert.equal(startsWithAll("postgres"), true, "unticking one must not affect another");
+
+  // `true` is never written, but reading one must not flip the answer.
+  setConfig({ autostart: { mysql: true } });
+  assert.equal(startsWithAll("mysql"), true);
+  setConfig({ autostart: {} });
+});
+
+test("Start all actually consults it, and the web servers are left out of it", () => {
+  const src = readFileSync(new URL("./manager/services.js", import.meta.url), "utf8");
+  const at = src.indexOf("export async function startAll");
+  assert.ok(at > 0, "startAll is gone");
+  assert.ok(
+    src.indexOf("startsWithAll(", at) > at,
+    "startAll no longer checks the tick, so it starts every installed database again",
+  );
+
+  // A web server row must NOT offer one: which of those comes up is `webServer`,
+  // chosen with "Use this", and two controls that can disagree would make
+  // "Start all" answerable two ways.
+  const view = readFileSync(new URL("./ui/services-view.js", import.meta.url), "utf8");
+  assert.match(
+    view,
+    /inProcess \|\| isWebServer\(id\) \? null : autostartBox\(/,
+    "the tick must not appear on a web server row",
+  );
 });
 
 console.log("\nasking for administrator rights");

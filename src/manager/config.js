@@ -46,7 +46,7 @@ const SETTING_KEYS = /** @type {const} */ ([
  * without the context of the question.
  *
  * @typedef {{ defaults?: Record<string, string>, ports?: Record<string, number>,
- *             skipTerminalPath?: boolean }} StoredConfig
+ *             autostart?: Record<string, boolean>, skipTerminalPath?: boolean }} StoredConfig
  */
 
 /**
@@ -105,6 +105,7 @@ export async function loadConfig() {
   setConfig({
     defaults: stored.defaults ?? {},
     ports: stored.ports ?? {},
+    autostart: stored.autostart ?? {},
     skipTerminalPath: stored.skipTerminalPath === true,
   });
 }
@@ -116,9 +117,41 @@ async function saveConfig() {
   const stored = {
     defaults: config.defaults,
     ports: config.ports,
+    autostart: config.autostart,
     skipTerminalPath: config.skipTerminalPath,
   };
   await writeJson(paths.configFile(), stored);
+}
+
+/**
+ * Does "Start all" bring this service up?
+ *
+ * Absent means yes. The alternative - storing `true` for everything at install
+ * time - makes the answer depend on WHEN a service was installed, and would
+ * silently exclude anything added by a release that did not know to write it.
+ *
+ * @param {string} id @returns {boolean}
+ */
+export function startsWithAll(id) {
+  return config.autostart[id] !== false;
+}
+
+/**
+ * Include or exclude a service from "Start all".
+ *
+ * The web servers are not asked: which of those comes up is `webServer`, chosen
+ * with "Use this", and a second control that could disagree with it would make
+ * "Start all" answerable two ways. Everything else is a genuine choice - two
+ * databases can run side by side and most people want one.
+ *
+ * @param {string} id @param {boolean} on @returns {Promise<void>}
+ */
+export async function setStartsWithAll(id, on) {
+  const next = { ...config.autostart };
+  if (on) delete next[id];
+  else next[id] = false;
+  setConfig({ autostart: next });
+  await saveConfig();
 }
 
 /**

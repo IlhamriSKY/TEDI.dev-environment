@@ -20,6 +20,7 @@ import {
   input,
   dropdown,
   checkbox,
+  modal,
 } from "./el.js";
 import { markFor } from "./marks.js";
 import { provider } from "../registry/index.js";
@@ -37,7 +38,12 @@ import {
 } from "../manager/services.js";
 import { listJobs, runningCount } from "../manager/cron.js";
 import { plannedPort, defaultPortFor, isWebServer } from "../web/ports.js";
-import { setServicePort, writeSetting } from "../manager/config.js";
+import {
+  setServicePort,
+  writeSetting,
+  startsWithAll,
+  setStartsWithAll,
+} from "../manager/config.js";
 import { publishHandoff } from "../manager/handoff.js";
 import { publish } from "../web/publish.js";
 import { openCron } from "./cron-view.js";
@@ -152,134 +158,214 @@ async function useWebServer(id, refresh) {
 }
 
 /**
- * The ports this service binds.
+ * Whether "Start all" includes this service.
  *
- * A web server has TWO, and the second can be switched off. Plenty of local
- * work never touches HTTPS, and a certificate per project plus a CA trusted
- * into the machine's store is a real cost for something unused. The switch is
- * `autoHttps`, so turning it off
- * drops the SSL block from every vhost and stops issuing certificates.
+ * MySQL and PostgreSQL run side by side perfectly happily, which is exactly why
+ * this is needed: "Start all" started every database that was installed, so
+ * anyone who had tried both ended up with a second one running and holding its
+ * port every time they pressed it. Absent means yes, so nothing changes for an
+ * environment that never touches this.
+ *
+ * @param {string} id @param {() => void} refresh @returns {HTMLElement}
+ */
+function autostartBox(id, refresh) {
+  const on = startsWithAll(id);
+  const box = checkbox(on);
+  box.addEventListener("click", async () => {
+    await setStartsWithAll(id, !on);
+    refresh();
+  });
+  // Wrapped rather than titled directly: `h` is what routes a `title` through
+  // the pane's own tooltip, and `checkbox` builds its node itself.
+  return h(
+    "label",
+    {
+      title: on
+        ? "Start all brings this up. Untick to leave it out."
+        : "Start all skips this. Its own Start button still works.",
+      style: "display:inline-flex;align-items:center;flex:none;cursor:pointer",
+      attrs: { "aria-label": `Start all includes ${id}` },
+    },
+    [box],
+  );
+}
+
+/**
+ * The port, or ports, as read-only facts.
+ *
+ * A pill once something is bound, because then the number describes a socket;
+ * muted text before that, because then it is only what will be tried. Both are
+ * the same width of information, which is the point - the row does not change
+ * shape when a service starts.
  *
  * @param {string} id
  * @param {import("../runtime.js").ServiceStatus | undefined} st
  * @param {boolean} live
- * @param {() => void} refresh
- * @returns {(HTMLElement | null)[]}
+ * @returns {HTMLElement[]}
  */
-function portControls(id, st, live, refresh) {
-  if (!isWebServer(id)) return [portControl(id, st, live, refresh)];
+function portPills(id, st, live) {
+  const shown = (/** @type {number} */ n, /** @type {string} */ title) =>
+    live
+      ? pill(`:${n}`, { title })
+      : h("span", { text: `:${n}`, title, style: "font-size:11px;color:var(--muted-foreground)" });
 
-  const https = config.autoHttps;
-  const box = checkbox(https);
-  box.addEventListener("click", async () => {
-    await writeSetting("autoHttps", !https);
-    // No domain changes when HTTPS goes off; only the vhosts do.
-    await publish({ hosts: false }).catch(() => {});
-    refresh();
-  });
-
-  return [
-    labelled("http", portControl(id, st, live, refresh)),
-    // The tick is the switch, and the field beside it exists only while it is
-    // on: a port for a protocol that is off would be a number with nothing
-    // behind it.
-    h(
-      "label",
-      {
-        style: "display:inline-flex;align-items:center;gap:5px;cursor:pointer",
-        title: https
-          ? "Serving HTTPS too, with a certificate per project from the local CA."
-          : "HTTPS is off: no certificates are issued and the vhosts carry no SSL block.",
-      },
-      [box, muted("https"), https ? httpsPortField(live, refresh) : muted("off")],
-    ),
-  ];
+  if (!isWebServer(id)) {
+    return [
+      shown(st?.port ?? plannedPort(id), live ? "The port it is bound to" : "The port it will try"),
+    ];
+  }
+  const out = [shown(config.httpPort, "HTTP")];
+  if (config.autoHttps) out.push(shown(config.httpsPort, "HTTPS, with a certificate per project"));
+  else out.push(muted("no https"));
+  return out;
 }
 
-/** @param {string} text @param {HTMLElement} control @returns {HTMLElement} */
-function labelled(text, control) {
-  return h("span", { style: "display:inline-flex;align-items:center;gap:5px" }, [
-    muted(text),
+/**
+ * Everything about this service that is a setting rather than a state.
+ *
+ * A dialog because it is a FORM: a web server has three fields and a switch,
+ * and having them inline meant every service row carried a form whether or not
+ * anyone was filling it in. Each field commits on its own like the rest of the
+ * pane, so there is no Save and nothing to cancel back to.
+ *
+ * @param {string} id @returns {void}
+ */
+function openServiceSettings(id) {
+  const p = provider(id);
+  const live = ["running", "starting"].includes(state.services.get(id)?.state ?? "");
+  // Each commit republishes and re-renders the pane behind the dialog, which
+  // would rebuild the field the user is standing in. It closes instead.
+  /** @type {{ close: () => void }} */
+  let dialog;
+  const done = () => dialog.close();
+
+  const rows = isWebServer(id)
+    ? [
+        settingRow(
+          "HTTP port",
+          "Where the project URLs point. 80 is the default, and binding it needs administrator rights on some systems.",
+          live ? pill(`:${config.httpPort}`) : webPortField("httpPort", 80, done),
+        ),
+        settingRow(
+          "HTTPS",
+          config.autoHttps
+            ? "Every project also gets a certificate from the local CA, and its vhost carries an SSL block."
+            : "Off: no certificates are issued and no vhost carries an SSL block. Plenty of local work never needs it.",
+          httpsSwitch(done),
+        ),
+        config.autoHttps
+          ? settingRow(
+              "HTTPS port",
+              "443 is the default.",
+              live ? pill(`:${config.httpsPort}`) : webPortField("httpsPort", 443, done),
+            )
+          : null,
+      ]
+    : [
+        settingRow(
+          "Port",
+          `Blank uses ${defaultPortFor(id)}. A port you type is never moved out from under you: if something else has it, this says so rather than landing on the next one along.`,
+          live
+            ? pill(`:${state.services.get(id)?.port ?? plannedPort(id)}`)
+            : servicePortField(id, done),
+        ),
+      ];
+
+  dialog = modal({
+    title: `${p?.label ?? id} settings`,
+    description: live
+      ? "Running, so its ports are shown as bound rather than offered for editing. Stop it to change them."
+      : undefined,
+    body: h("div", { style: "display:flex;flex-direction:column;gap:2px" }, rows),
+    footer: h("div", { style: "display:flex;justify-content:flex-end" }, [
+      button("Done", () => dialog.close(), { variant: "primary" }),
+    ]),
+    width: "min(30rem,100%)",
+  });
+}
+
+/** One labelled setting, the shape the Settings dialog uses.
+ *  @param {string} title @param {string} note @param {Node | null} control
+ *  @returns {HTMLElement} */
+function settingRow(title, note, control) {
+  return row([
+    h("div", { style: "display:flex;flex-direction:column;gap:0;min-width:0" }, [
+      h("span", { text: title, style: "font-size:12px;font-weight:600;line-height:1.35" }),
+      muted(note),
+    ]),
+    h("div", { style: "flex:1" }),
     control,
   ]);
 }
 
-/** The HTTPS port, a setting exactly like the HTTP one.
- *  @param {boolean} live @param {() => void} refresh @returns {HTMLElement} */
-function httpsPortField(live, refresh) {
-  if (live) return pill(":" + config.httpsPort, { title: "The HTTPS port it is bound to" });
-  const field = input(
-    String(config.httpsPort),
-    async (value) => {
-      const next = Number(value.trim());
-      if (!Number.isInteger(next) || next < 1 || next > 65535) {
-        ctx?.ui.toast(value.trim() + " is not a port. Use 1 to 65535.", { variant: "error" });
-        refresh();
-        return;
-      }
-      await writeSetting("httpsPort", next);
-      // A port lives in the vhost, never in the hosts file.
-      await publish({ hosts: false }).catch(() => {});
-      refresh();
-    },
-    "443",
-  );
-  field.style.width = "64px";
-  field.style.textAlign = "center";
-  field.setAttribute("aria-label", "HTTPS port");
-  return field;
+/** The HTTPS switch. Off means no certificate is issued at all, which is why it
+ *  republishes rather than only storing a flag.
+ *  @param {() => void} done @returns {HTMLElement} */
+function httpsSwitch(done) {
+  const on = config.autoHttps;
+  const box = checkbox(on);
+  box.setAttribute("aria-label", "Serve HTTPS");
+  box.addEventListener("click", async () => {
+    await writeSetting("autoHttps", !on);
+    // No domain changes when HTTPS goes off; only the vhosts do.
+    await publish({ hosts: false }).catch(() => {});
+    done();
+  });
+  return box;
+}
+
+/** A web server port, which is a real setting because it appears in every
+ *  project URL.
+ *  @param {"httpPort" | "httpsPort"} key @param {number} fallback
+ *  @param {() => void} done @returns {HTMLElement} */
+function webPortField(key, fallback, done) {
+  return portField(String(config[key]), String(fallback), async (next) => {
+    await writeSetting(key, next ?? fallback);
+    // A port lives in the vhost, never in the hosts file.
+    await publish({ hosts: false }).catch(() => {});
+    done();
+  });
+}
+
+/** A database or cache port, stored per service rather than as a setting.
+ *  @param {string} id @param {() => void} done @returns {HTMLElement} */
+function servicePortField(id, done) {
+  return portField(String(plannedPort(id)), String(defaultPortFor(id)), async (next) => {
+    await setServicePort(id, next);
+    await publishHandoff();
+    done();
+  });
 }
 
 /**
- * The port, as a pill while it is bound and a field while it is not.
+ * A port input that refuses anything that is not one.
  *
- * A web server writes `httpPort`, the real setting, because that number is in
- * every project URL and there has to be exactly one of it. Everything else
- * writes a per-service pin in `config.json`, which also tells `choosePort`
- * never to move it: a port somebody typed was typed because something is
- * pointing at it.
+ * `null` for blank, which every caller reads as "the conventional default" -
+ * so clearing the field is how you undo a pin, rather than having to remember
+ * what the number used to be.
  *
- * Blank clears the pin and goes back to the conventional default, which is a
- * way back that costs no second control.
- *
- * @param {string} id
- * @param {import("../runtime.js").ServiceStatus | undefined} st
- * @param {boolean} live  Running or starting: the port is a fact, not a request.
- * @param {() => void} refresh
+ * @param {string} value @param {string} placeholder
+ * @param {(next: number | null) => Promise<void>} commit
  * @returns {HTMLElement}
  */
-function portControl(id, st, live, refresh) {
-  const planned = plannedPort(id);
-  if (live) return pill(`:${st?.port ?? planned}`, { title: "The port it is bound to" });
-
+function portField(value, placeholder, commit) {
   const field = input(
-    String(planned),
-    async (value) => {
-      const text = value.trim();
+    value,
+    async (raw) => {
+      const text = raw.trim();
       const next = text === "" ? null : Number(text);
       if (next !== null && (!Number.isInteger(next) || next < 1 || next > 65535)) {
         ctx?.ui.toast(`${text} is not a port. Use 1 to 65535, or leave it blank for the default.`, {
           variant: "error",
         });
-        refresh();
         return;
       }
-      if (isWebServer(id)) await writeSetting("httpPort", next ?? 80);
-      else await setServicePort(id, next);
-      // A generated vhost carries the web server's port in its `listen` lines,
-      // so a port change is a republish and not just a stored number - but the
-      // hosts file holds domains, not ports, so it is not a hosts sync.
-      await publish({ hosts: false }).catch(() => {});
-      // And a database's port is in the connection another extension was
-      // handed, so that is a republish too.
-      await publishHandoff();
-      refresh();
+      await commit(next);
     },
-    String(defaultPortFor(id)),
+    placeholder,
   );
-  field.style.width = "72px";
+  field.style.width = "76px";
   field.style.textAlign = "center";
-  field.setAttribute("aria-label", `Port for ${id}`);
   return field;
 }
 
@@ -324,6 +410,10 @@ function serviceRow(id, refresh) {
     "div",
     { style: "display:flex;align-items:center;gap:8px;min-width:170px;flex:none" },
     [
+      // Whether "Start all" brings this one up. Not offered for the web
+      // servers: which of those comes up is "Use this", and a second control
+      // that could disagree with it would make "Start all" answerable two ways.
+      inProcess || isWebServer(id) ? null : autostartBox(id, refresh),
       mark(logo),
       h("div", { style: "display:flex;flex-direction:column;gap:0;min-width:0" }, [
         h("span", {
@@ -354,13 +444,13 @@ function serviceRow(id, refresh) {
       // same control: switch what is installed, install another. Only the
       // scheduler has no version, because it is a timer in this extension.
       inProcess ? null : versionPicker(id, installed, refresh),
-      // A port, for the things that bind one - and while the service is
-      // stopped, the port is a FIELD rather than a label. Changing it is the
-      // common reason someone opens this pane: something on the machine already
-      // has 3306, or 80. A running service keeps a pill, because that number is
-      // a fact about a bound socket and not a request. The scheduler binds
-      // nothing, and a pill reading `:8000` beside it would be an invented fact.
-      ...(inProcess ? [] : portControls(id, st, running || starting, refresh)),
+      // The port as a FACT, not a field. Three inputs sat here - http, a
+      // tick, https - which is a form, and a form belongs in a dialog rather
+      // than wedged between a version dropdown and a Start button on every one
+      // of six rows. The number is still worth a glance, so it stays; changing
+      // it is behind the gear. The scheduler binds nothing, and a pill reading
+      // `:8000` beside it would be an invented fact.
+      ...(inProcess ? [] : portPills(id, st, running || starting)),
       // What the scheduler is actually carrying, which is the only thing about
       // it worth a glance: how many jobs, and whether any is running now.
       inProcess ? pill(jobSummary()) : null,
@@ -393,6 +483,12 @@ function serviceRow(id, refresh) {
     // The scheduler's contents open FROM its row, like php.ini opens from the
     // PHP row: a list you go and work on rather than a state you watch, and one
     // that does not belong under the two things this pane exists to show.
+    inProcess
+      ? null
+      : button("", () => openServiceSettings(id), {
+          icon: "lucide:Settings2",
+          title: `Port${isWebServer(id) ? "s and HTTPS" : ""} for ${p?.label ?? id}`,
+        }),
     inProcess
       ? null
       : button("Install", () => p && void openInstaller(p, refresh), {

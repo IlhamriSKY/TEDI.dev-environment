@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.14
+
+- **Start all starts what you tick.** MySQL and PostgreSQL run side by side
+  perfectly happily, which is exactly why this was wrong: **Start all** brought
+  up every database that was installed, so anyone who had tried both ended up
+  with a second one running and holding its port on every press. Each service
+  row has a tick now. Unticked means **Start all** skips it; its own Start
+  button still works. Absent means included, so an environment that never
+  touches this starts exactly what it always did. The web servers have no tick,
+  because which of those comes up is already **Use this** and two controls that
+  could disagree would make **Start all** answerable two ways.
+
+- **Ports and HTTPS are behind a gear, not on the row.** A web server carried
+  three inputs and a switch inline, which is a form, and a form does not belong
+  wedged between a version dropdown and a Start button on every one of six
+  rows. The gear opens the settings for that one service; the row keeps the
+  port as a fact, because the number is worth a glance even when you are not
+  changing it. A running service shows its ports as bound rather than offering
+  them for editing, which is what it always did.
+
 ## 0.1.13
 
 - **No console window flashes over the app.** Everything this extension spawns
