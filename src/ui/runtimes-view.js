@@ -7,18 +7,18 @@
 // that sometimes takes 200ms and sometimes takes four minutes trains people to
 // be afraid of it.
 
-import { h, row, pill, muted, button, dropdown, section, mark, modal } from "./el.js";
+import { h, row, pill, muted, button, dropdown, section, mark, modal, progress } from "./el.js";
 import { openPhpConfig } from "./php-view.js";
 import { openPackagers } from "./packagers-view.js";
 import { markFor } from "./marks.js";
-import { providers, provider } from "../registry/index.js";
+import { providers } from "../registry/index.js";
 import { installedOf } from "../manager/versions.js";
 import { activeVersion, setActiveVersion } from "../manager/config.js";
 import { install, uninstall } from "../manager/install.js";
 import { applyRuntimeChange } from "../manager/apply.js";
 import { installable } from "../manager/defaults.js";
 import { installEverything } from "./install-all.js";
-import { state, ctx } from "../runtime.js";
+import { state, ctx, throttle } from "../runtime.js";
 
 /** @typedef {import("../registry/index.js").Provider} Provider */
 
@@ -77,7 +77,13 @@ function runtimeRow(p, refresh) {
       mark(logo),
       h("div", { style: "display:flex;flex-direction:column;gap:0;min-width:0" }, [
         h("span", { text: p.label, style: "font-size:12px;font-weight:600;line-height:1.35" }),
-        muted(busy ?? (installed.length ? `${installed.length} installed` : "not installed")),
+        muted(
+          busy
+            ? `${busy.text}${busy.pct === undefined ? "" : ` ${busy.pct}%`}`
+            : installed.length
+              ? `${installed.length} installed`
+              : "not installed",
+        ),
       ]),
     ],
   );
@@ -146,7 +152,14 @@ function runtimeRow(p, refresh) {
       : null,
   ]);
 
-  return row([left, middle, right]);
+  const line = row([left, middle, right]);
+  // Same shape the setup checklist uses: the bar belongs to the row doing the
+  // work, so nothing has to say which component it is measuring.
+  if (!busy) return line;
+  return h("div", { style: "display:flex;flex-direction:column;min-width:0" }, [
+    line,
+    progress(busy.pct),
+  ]);
 }
 
 /**
@@ -160,7 +173,12 @@ function runtimeRow(p, refresh) {
  * @returns {Promise<void>}
  */
 async function openInstaller(p, refresh) {
-  state.busy.set(p.id, "Checking available versions");
+  // Throttled, because `curl` reports a new percentage up to a hundred times
+  // per transfer and each one repaints the whole panel. The `finally` below
+  // repaints unconditionally, so the frame that lands at 100% is never the one
+  // that gets dropped.
+  const tick = throttle(refresh);
+  state.busy.set(p.id, { text: "Checking available versions" });
   refresh();
   try {
     const list = await p.versions();
@@ -179,9 +197,9 @@ async function openInstaller(p, refresh) {
     const picked = await pickVersion(p, list);
     if (!picked) return;
 
-    await install(p, picked, (msg, pct) => {
-      state.busy.set(p.id, pct === undefined ? msg : `${msg} ${pct}%`);
-      refresh();
+    await install(p, picked, (text, pct) => {
+      state.busy.set(p.id, { text, ...(pct === undefined ? {} : { pct }) });
+      tick();
     });
     // Rescan BEFORE choosing a default: `setActiveVersion` records a version
     // that `resolveVersion` has to be able to find, and it reads the scan.

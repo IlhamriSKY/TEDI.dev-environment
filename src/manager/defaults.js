@@ -148,14 +148,22 @@ export async function installRecommended(say) {
   /** @type {string[]} */ const unavailable = [];
   /** @type {{id: string, error: string}[]} */ const failed = [];
 
-  for (const p of installable()) {
+  const queue = installable();
+  // Only the ones that will actually be worked on count towards "3 of 9": a
+  // component that is already there is skipped in a millisecond, and counting
+  // it makes the bar jump before anything has been downloaded.
+  const total = queue.filter((p) => !installedOf(p.id).some((r) => r.origin === "download")).length;
+  let step = 0;
+
+  for (const p of queue) {
     if (installedOf(p.id).some((r) => r.origin === "download")) {
       skipped.push(p.label);
       continue;
     }
+    step++;
 
     try {
-      state.busy.set(p.id, "Checking versions");
+      state.busy.set(p.id, { text: "Checking versions", step, total });
       say?.(`Looking up ${p.label}`);
       const version = await recommendedVersion(p.id);
       if (!version) {
@@ -163,9 +171,10 @@ export async function installRecommended(say) {
         unavailable.push(p.label);
         continue;
       }
-      await install(p, version, (msg, pct) => {
-        const text = pct === undefined ? msg : `${msg} ${pct}%`;
-        state.busy.set(p.id, text);
+      // `install` already writes `state.busy`; this adds the batch position,
+      // which only the batch knows.
+      await install(p, version, (text, pct) => {
+        state.busy.set(p.id, { text, ...(pct === undefined ? {} : { pct }), step, total });
         say?.(`${p.label}: ${text}`);
       });
       await setActiveVersion(p.id, version);

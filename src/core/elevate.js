@@ -43,15 +43,23 @@ export async function elevate(lines, opts = {}) {
   await mkdirp(paths.run());
   const file = scriptPath();
 
-  try {
-    if (isWindows()) return await elevateWindows(file, lines);
-    if (isMac()) return await elevateMac(file, lines, opts.description);
-    return await elevateLinux(file, lines);
-  } finally {
-    // The script can contain the full list of domains being written. Not
-    // secret, but there is no reason to leave it lying around after it ran.
-    await remove(file).catch(() => {});
-  }
+  const result = isWindows()
+    ? await elevateWindows(file, lines)
+    : isMac()
+      ? await elevateMac(file, lines, opts.description)
+      : await elevateLinux(file, lines);
+
+  // Removed on SUCCESS only. The script can contain the full list of domains
+  // being written - not secret, but there is no reason to leave it lying around
+  // once it has run.
+  //
+  // On failure it has to survive, because the message may be the only way
+  // forward: the Linux path with no Polkit agent hands the user
+  // `sudo sh <file>` and a `finally` deleted that file before they could read
+  // the sentence naming it. The next `elevate()` writes the same path, so
+  // nothing accumulates.
+  if (result.ok) await remove(file).catch(() => {});
+  return result;
 }
 
 /**

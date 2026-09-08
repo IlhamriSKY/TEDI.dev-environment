@@ -24,7 +24,7 @@ import { join, home, samePath } from "../core/paths.js";
 import { readText } from "../core/fsx.js";
 
 /** The tools the shim directory provides. Any other PATH entry that also
- *  provides one of these would shadow the managed runtimes - a Laragon
+ *  provides one of these would shadow the managed runtimes - another stack's
  *  `bin\php` first on the PATH means `php` is never the version this extension
  *  was asked to select - so registering ours switches those off.
  *  @type {string[]} */
@@ -150,6 +150,32 @@ export async function registerTerminalPath(dir) {
     return { ok: Boolean(res?.added), disabled: res?.disabled ?? [] };
   } catch (err) {
     return { ok: false, disabled: [], error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Move this extension's entry from one directory to another.
+ *
+ * Only used by the layout migration, and only when the OLD path was actually
+ * registered: re-registering a PATH the user never asked for would be taking a
+ * decision on their behalf under cover of a folder move.
+ *
+ * @param {string} from  The stale directory.
+ * @param {string} to    Where the shims are now.
+ * @returns {Promise<boolean>} whether the entry was moved
+ */
+export async function relocateTerminalPath(from, to) {
+  if (!canRegisterPath()) return false;
+  if (!(await pathOnTerminal(from))) return false;
+  try {
+    await ctx?.terminal?.unregisterPath(from);
+    const res = await ctx?.terminal?.registerPath(to, { provides: SHIMMED_TOOLS });
+    return Boolean(res?.added);
+  } catch {
+    // The row is still there pointing at a directory that has moved. The setup
+    // checklist will show the step as outstanding, with the button that fixes
+    // it, which is the same place a user would end up anyway.
+    return false;
   }
 }
 

@@ -491,34 +491,115 @@ export function checkbox(checked, opts = {}) {
 }
 
 /**
- * A status dot in the app's own status colours.
+ * A state, as a glyph in the app's own status colours.
  *
- * `--chart-2` and `--chart-4` were the obvious guess and they are wrong: in the
- * shipped theme they are SYNTAX colours (`#c586c0` pink, `#9cdcfe` light blue),
- * so "running" rendered pink and "needs attention" rendered blue. TEDI's actual
- * status triad is `--tedi-icon-{idle,working,blocked}`, the same green/amber/red
- * the AI CLI badge and the SSH tab use, and it travels with an exported theme.
+ * This was a 6px filled square. A square carries its whole meaning in its fill,
+ * which makes it a colour quiz: green and amber at that size are two shades of
+ * bright, and to anyone with a red-green deficiency "running" and "failed" are
+ * the same mark. A tick, a spinner, a triangle and an alert circle each say
+ * their state on their own, and the colour then agrees with the shape instead
+ * of being the only carrier of it.
  *
- * It is a SQUARE, not a circle, and that is not an oversight: `globals.css`
- * force-zeroes every `border-radius` with an `!important` on `*`, so a round dot
- * is not something this app has. Asking for one would need
- * `setProperty(..., "important")` and would make this the only round thing on
- * screen.
+ * `--chart-2` and `--chart-4` were the obvious guess for those colours and they
+ * are wrong: in the shipped theme they are SYNTAX colours (`#c586c0` pink,
+ * `#9cdcfe` light blue), so "running" rendered pink and "needs attention"
+ * rendered blue. TEDI's actual status triad is `--tedi-icon-{idle,working,
+ * blocked}`, the same green/amber/red the AI CLI badge and the SSH tab use, and
+ * it travels with an exported theme.
  *
- * @param {"ok"|"warn"|"error"|"idle"} tone @returns {HTMLElement}
+ * @param {"ok"|"working"|"warn"|"error"|"idle"} tone
+ * @param {number} [size]
+ * @returns {HTMLElement}
  */
-export function dot(tone) {
-  const colour =
-    tone === "ok"
-      ? "var(--tedi-icon-idle, #34d399)"
-      : tone === "warn"
-        ? "var(--tedi-icon-working, #facc15)"
-        : tone === "error"
-          ? "var(--tedi-icon-blocked, var(--destructive))"
-          : "var(--muted-foreground)";
-  return h("span", {
-    style: `width:6px;height:6px;background:${colour};flex:none;display:inline-block`,
+export function status(tone, size = 13) {
+  const spec = STATUS_TONES[tone] ?? STATUS_TONES.idle;
+  const node = icon(spec.icon, spec.colour, size);
+  // The app's own breathing pulse, by name. `ai-breathe` is defined at the top
+  // level of `styles/globals.css` precisely so it is always available, and this
+  // pane renders in the same document - so the animation an active AI CLI icon
+  // uses is the animation this uses, rather than a second one that drifts from
+  // it. If the host ever drops the keyframe the icon simply stops breathing,
+  // which is the right way for a decoration to fail.
+  if (spec.breathe) node.style.animation = "ai-breathe 1.8s ease-in-out infinite";
+  return node;
+}
+
+/**
+ * What each state looks like.
+ *
+ * A glyph and a colour, never a colour alone: the previous 6px square carried
+ * the whole state in its fill, which is unreadable to anyone who cannot
+ * separate the greens from the reds and is a guess for everyone else. A tick, a
+ * spinner, a warning triangle and an alert circle say the same thing without
+ * the colour, and the colour then confirms it.
+ *
+ * The tokens are the app's own status trio. `--tedi-icon-idle` is the GREEN one
+ * despite the name: in the AI CLI vocabulary it means ready, which is what a
+ * running service is.
+ */
+const STATUS_TONES = {
+  ok: { icon: "lucide:CircleCheck", colour: "var(--tedi-icon-idle, #34d399)", breathe: false },
+  working: {
+    icon: "lucide:LoaderCircle",
+    colour: "var(--tedi-icon-working, #facc15)",
+    breathe: true,
+  },
+  warn: {
+    icon: "lucide:TriangleAlert",
+    colour: "var(--tedi-icon-working, #facc15)",
+    breathe: false,
+  },
+  error: {
+    icon: "lucide:CircleAlert",
+    colour: "var(--tedi-icon-blocked, var(--destructive))",
+    breathe: false,
+  },
+  idle: { icon: "lucide:Circle", colour: "var(--muted-foreground)", breathe: false },
+};
+
+/**
+ * A progress bar, in the shape `components/ui/progress.tsx` renders.
+ *
+ * That component is a `bg-muted` track with a `bg-primary/90` indicator moved
+ * by `translateX(-(100 - value)%)` rather than resized, which is what makes the
+ * `transition-all` animate smoothly instead of reflowing. Ported rather than
+ * reinvented so a download here looks like every other progress in the app.
+ *
+ * An UNKNOWN length is drawn as a sweep, never as 0%. "Unpacking" and
+ * "Verifying" have no measurable length, and a bar sitting at zero through them
+ * reads as a download that stalled - which is exactly the moment a user reaches
+ * for the cancel they do not have.
+ *
+ * @param {number} [pct] 0-100, or omitted for indeterminate.
+ * @returns {HTMLElement}
+ */
+export function progress(pct) {
+  const known = typeof pct === "number" && Number.isFinite(pct);
+  const value = known ? Math.max(0, Math.min(100, pct)) : 0;
+
+  const indicator = h("div", {
+    style:
+      "height:100%;background:color-mix(in oklab,var(--primary) 90%,transparent);" +
+      (known
+        ? `width:100%;transition:transform .15s ease;transform:translateX(-${100 - value}%)`
+        : "width:40%;animation:tedi-dev-sweep 1.1s ease-in-out infinite"),
   });
+
+  return h(
+    "div",
+    {
+      attrs: {
+        role: "progressbar",
+        "aria-valuemin": "0",
+        "aria-valuemax": "100",
+        ...(known ? { "aria-valuenow": String(value) } : {}),
+      },
+      style:
+        "display:flex;align-items:center;height:12px;width:100%;min-width:0;" +
+        "overflow-x:hidden;background:var(--muted)",
+    },
+    [indicator],
+  );
 }
 
 /** A muted one-line caption. @param {string} text @returns {HTMLElement} */
@@ -565,81 +646,6 @@ export function section(title, children, aside) {
     h("div", { style: "display:flex;flex-direction:column;gap:4px" }, children),
   ]);
 }
-
-/**
- * A section that collapses.
- *
- * For everything read once at setup or only occasionally changed. Those
- * sections are long, and leaving them open pushes the two things a user
- * actually watches - what is running, and which projects exist - below the fold
- * on a short pane.
- *
- * Open state is remembered per title in module state rather than in the DOM,
- * because the pane re-renders wholesale and a `<details>` element's own state
- * would be thrown away with the node on every repaint.
- *
- * @param {string} title
- * @param {(Node|string|null|false|undefined)[]} children
- * @param {{ aside?: Node, summary?: string, defaultOpen?: boolean }} [opts]
- * @returns {HTMLElement}
- */
-export function accordion(title, children, opts = {}) {
-  const isOpen = openSections.get(title) ?? opts.defaultOpen ?? false;
-
-  const chevron = h("span", {
-    text: "›",
-    style:
-      `display:inline-block;font-size:13px;line-height:1;color:var(--muted-foreground);` +
-      `transform:rotate(${isOpen ? "90deg" : "0deg"});transition:transform .15s ease;flex:none`,
-  });
-
-  const body = h(
-    "div",
-    { style: `display:${isOpen ? "flex" : "none"};flex-direction:column;gap:4px;padding-top:6px` },
-    children,
-  );
-
-  const label = h(
-    "button",
-    {
-      style:
-        "display:flex;align-items:center;gap:7px;flex:1;min-width:0;padding:0;border:0;" +
-        "background:transparent;cursor:pointer;text-align:left;outline:none",
-    },
-    [
-      chevron,
-      heading(title),
-      opts.summary
-        ? h("span", {
-            text: opts.summary,
-            style: "font-size:10.5px;color:var(--muted-foreground);opacity:.7",
-          })
-        : null,
-    ],
-  );
-
-  label.addEventListener("click", () => {
-    const next = body.style.display === "none";
-    openSections.set(title, next);
-    body.style.display = next ? "flex" : "none";
-    chevron.style.transform = `rotate(${next ? "90deg" : "0deg"})`;
-  });
-
-  // The aside sits OUTSIDE the toggle button rather than inside it: it holds
-  // real buttons, and a button inside a button is both invalid and a click that
-  // toggles the section as a side effect of pressing Start.
-  const head = h(
-    "div",
-    { style: "display:flex;align-items:center;gap:8px;justify-content:space-between" },
-    [label, opts.aside ?? null],
-  );
-
-  return h("section", { style: "display:flex;flex-direction:column" }, [head, body]);
-}
-
-/** Which accordions the user has opened, by title. Survives a repaint.
- *  @type {Map<string, boolean>} */
-const openSections = new Map();
 
 /** A bordered row. @param {(Node|string|null|false|undefined)[]} children @returns {HTMLElement} */
 export function row(children) {
@@ -805,73 +811,12 @@ if (typeof document !== "undefined" && !document.getElementById("tedi-devenv-ani
       attrs: { id: "tedi-devenv-anim" },
       text:
         "@keyframes tedi-dev-fade{from{opacity:0}to{opacity:1}}" +
-        "@keyframes tedi-dev-pop{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}",
+        "@keyframes tedi-dev-pop{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}" +
+        // The indeterminate progress sweep. Travels the full track width plus
+        // its own, so the block leaves one edge exactly as it enters the other.
+        "@keyframes tedi-dev-sweep{0%{transform:translateX(-100%)}100%{transform:translateX(250%)}}",
     }),
   );
-}
-
-/**
- * Ask for one line of text.
- *
- * Not `window.prompt`: a Tauri webview may refuse it outright, and where it does
- * work it blocks the whole renderer and cannot be styled to match the app. A
- * refusal would be silent here, which is the worst kind - the button would
- * simply do nothing.
- *
- * @param {string} title
- * @param {string} [placeholder]
- * @param {string} [description]  The dialog's own `DialogDescription` line.
- * @returns {Promise<string | null>}
- */
-export function ask(title, placeholder = "", description = "") {
-  return new Promise((resolve) => {
-    const field = textInput(placeholder, "100%", 30);
-    let settled = false;
-    /** @param {string | null} value */
-    const finish = (value) => {
-      if (settled) return;
-      settled = true;
-      resolve(value);
-    };
-
-    const cancel = button("Cancel", () => {
-      finish(null);
-      close();
-    });
-    const ok = button(
-      "OK",
-      () => {
-        finish(field.value.trim() || null);
-        close();
-      },
-      { variant: "primary" },
-    );
-    // `DialogFooter` is `sm:[&>button]:flex-1`: the buttons SPLIT the row rather
-    // than hugging the right edge. Two right-aligned pills was the other thing
-    // that made these dialogs read as not-quite-TEDI.
-    for (const b of [cancel, ok]) {
-      b.style.flex = "1";
-      b.style.height = "30px";
-    }
-
-    const { close } = modal({
-      title,
-      description,
-      body: field,
-      footer: h("div", { style: "display:flex;gap:8px" }, [cancel, ok]),
-      // Dismissing with Escape or a backdrop click has to resolve too, or the
-      // caller waits forever on a dialog that is no longer on screen.
-      onClose: () => finish(null),
-    });
-
-    field.addEventListener("keydown", (ev) => {
-      if (/** @type {KeyboardEvent} */ (ev).key === "Enter") {
-        finish(field.value.trim() || null);
-        close();
-      }
-    });
-    field.focus();
-  });
 }
 
 /**

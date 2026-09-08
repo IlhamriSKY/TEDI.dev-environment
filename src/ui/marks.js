@@ -79,6 +79,8 @@ const MARKS = {
  *  @type {Record<string, { icon: string, colour: string }>} */
 const LUCIDE = {
   mkcert: { icon: "lucide:ShieldCheck", colour: "#4c8bf5" },
+  // The scheduler is ours, not a project with a logo, so it takes a glyph.
+  cron: { icon: "lucide:CalendarClock", colour: "#8b7fd4" },
 };
 
 const FALLBACK = { icon: "lucide:Box", colour: "var(--muted-foreground)" };

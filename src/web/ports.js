@@ -11,7 +11,7 @@
 // loopback-only by design, which also means this extension cannot be turned
 // into a port scanner by a malicious project config.
 
-import { ctx } from "../runtime.js";
+import { ctx, config } from "../runtime.js";
 
 /**
  * Is something listening on this loopback port right now?
@@ -106,4 +106,54 @@ export function defaultPortFor(componentId) {
     default:
       return 8000;
   }
+}
+
+/** Both web servers this extension can run. */
+export const WEB_SERVERS = /** @type {const} */ (["nginx", "apache"]);
+
+/** @param {string} id @returns {boolean} */
+export function isWebServer(id) {
+  return id === "nginx" || id === "apache";
+}
+
+/**
+ * The ports one web server binds.
+ *
+ * The ACTIVE server keeps the configured pair, because those numbers are in
+ * every URL the user has open and in every bookmark. A second web server that
+ * is also installed gets a fixed offset instead, so both can be installed and
+ * both can run, and trying the other one never means stopping the first.
+ *
+ * DETERMINISTIC, not allocated. The number is written into the generated
+ * vhost's `listen`, so it has to be the same one next time the config is
+ * regenerated; a counter would renumber them in whatever order the servers
+ * happened to be scanned. 80 and 443 become 8080 and 8443, which are the
+ * conventional alternates, and the offset keeps them distinct even when the
+ * user has already moved the configured pair up.
+ *
+ * @param {string} id
+ * @returns {{ http: number, https: number }}
+ */
+export function serverPorts(id) {
+  if (id === config.webServer) return { http: config.httpPort, https: config.httpsPort };
+  // ponytail: a flat offset, so a configured pair exactly 8000 apart (http 443,
+  // https 8443) makes the alternate's HTTP land on the active's HTTPS. That
+  // configuration fails loudly rather than silently - `choosePort` finds the
+  // port in use and says so by name - so the fix is a second offset only if
+  // anyone ever hits it.
+  /** @param {number} p */
+  const shift = (p) => (p + 8000 > 65535 ? p - 8000 : p + 8000);
+  return { http: shift(config.httpPort), https: shift(config.httpsPort) };
+}
+
+/**
+ * The port this service will TRY to bind, before anything checks whether it is
+ * free. One answer, so the row in the dashboard and the process that starts
+ * cannot disagree about which port was meant.
+ *
+ * @param {string} id
+ * @returns {number}
+ */
+export function plannedPort(id) {
+  return isWebServer(id) ? serverPorts(id).http : defaultPortFor(id);
 }

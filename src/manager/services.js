@@ -20,12 +20,24 @@ import { installedOf, resolveVersion } from "./versions.js";
 import { activeVersion } from "./config.js";
 import { fastcgiPort, generate } from "../web/vhost.js";
 import { phpFastCgi } from "../registry/php.js";
-import { defaultPortFor, inUse, findFree } from "../web/ports.js";
+import { plannedPort, isWebServer, inUse, findFree } from "../web/ports.js";
+import { serverExe } from "../web/serverroot.js";
+import { startCron, stopCron, isRunning as isCronRunning } from "./cron.js";
 
 /** @typedef {import("../runtime.js").ServiceStatus} ServiceStatus */
 
 /** Services this module knows how to run, in dashboard order. */
-export const SERVICE_IDS = ["nginx", "apache", "mysql", "postgres", "redis"];
+export const SERVICE_IDS = ["nginx", "apache", "mysql", "postgres", "redis", "cron"];
+
+/**
+ * Services that are a timer in this extension rather than a process on disk.
+ *
+ * The scheduler has no version to resolve, nothing to download and no handle to
+ * supervise, so every "is it installed" gate in here and in the dashboard would
+ * answer no and disable its own Start button. One set, asked in the four places
+ * that care, beats an `id === "cron"` scattered through them.
+ */
+export const IN_PROCESS = new Set(["cron"]);
 
 /** @param {string} id @returns {ServiceStatus} */
 function statusOf(id) {
@@ -56,6 +68,19 @@ export async function start(id) {
     return current;
   }
 
+  // The scheduler is a timer here, not a process out there. Which is also the
+  // honest scope of it: your development cron runs exactly while your
+  // development environment does, and never behind your back.
+  if (IN_PROCESS.has(id)) {
+    try {
+      await startCron();
+      return setStatus(id, { state: "running", handle: null, port: null, error: null });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return setStatus(id, { state: "error", handle: null, error: message });
+    }
+  }
+
   const version = activeVersion(id) ?? installedOf(id)[0]?.version ?? null;
   const row = resolveVersion(id, version);
   if (!row) {
@@ -70,7 +95,7 @@ export async function start(id) {
 
   try {
     const port = await choosePort(id);
-    const plan = await planFor(id, row.binDir, row.version, port);
+    const plan = await planFor(id, row, port);
     if (plan.init) await plan.init();
 
     const handle = await spawn(plan.program, plan.args, plan.cwd ? { cwd: plan.cwd } : {});
@@ -113,25 +138,60 @@ export async function start(id) {
  */
 export async function stop(id) {
   const s = statusOf(id);
+  if (IN_PROCESS.has(id)) {
+    stopCron();
+    return setStatus(id, { state: "stopped", handle: null, error: null });
+  }
   const row = resolveVersion(id, s.version);
 
-  if (row && (id === "nginx" || id === "apache")) {
-    const exe = join(row.binDir, `${id === "nginx" ? "nginx" : "httpd"}${exeSuffix()}`);
+  if (row && isWebServer(id)) {
+    // Resolved, not spelled: Debian and Ubuntu ship Apache's binary as
+    // `apache2`, so `join(binDir, "httpd")` names nothing there and the
+    // graceful stop silently did not happen.
+    const exe = await serverExe(/** @type {"nginx"|"apache"} */ (id), row);
     const args =
       id === "nginx"
-        ? ["-p", row.dir, "-c", join(paths.conf("nginx"), "nginx.conf"), "-s", "stop"]
+        ? ["-p", paths.internal(), "-c", join(paths.conf("nginx"), "nginx.conf"), "-s", "stop"]
         : ["-f", join(paths.conf("apache"), "httpd.conf"), "-k", "stop"];
     await run(exe, args, { timeoutMs: 20_000 }).catch(() => {});
   }
 
   if (s.handle !== null) await kill(s.handle);
+
+  // Wait for the port to actually go quiet, for EVERY service that had one.
+  //
+  // `nginx -s stop` returns as soon as the master has been SIGNALLED, and the
+  // workers holding the listening socket take a moment longer to exit. So
+  // `restart`, which slept a fixed 300ms, could hand `start` a port that was
+  // still bound, and the failure surfaces as "Port 80 is already in use" -
+  // which reads as another program's fault rather than as our own previous
+  // process.
+  //
+  // This was briefly gated on the web servers, on the reasoning that a database
+  // is allowed to move. That is backwards: a web server that cannot reclaim its
+  // port at least says so, while a database SILENTLY moves to the next free one
+  // (`choosePort`) - so restarting MySQL while its own dying process still held
+  // 3306 would land it on 3307, and every connection string pointing at 3306
+  // would then be wrong with nothing on screen to say why.
+  //
+  // Bounded, because `deactivate` also goes through here and quitting TEDI must
+  // not sit waiting on a port something ELSE is holding. The bound is a
+  // ceiling, not a cost: a killed process releases its socket in well under a
+  // second, so a normal quit spends a few hundred milliseconds here in total.
+  if (s.port !== null) {
+    const deadline = Date.now() + 3_000;
+    while (Date.now() < deadline && (await inUse(s.port))) await sleep(150);
+  }
+
   return setStatus(id, { state: "stopped", handle: null, error: null });
 }
 
 /** @param {string} id @returns {Promise<ServiceStatus>} */
 export async function restart(id) {
+  // No sleep of its own: `stop` now waits for the port rather than guessing how
+  // long a shutdown takes, which is the only version of this that is right on a
+  // slow machine as well as a fast one.
   await stop(id);
-  await sleep(300);
   return await start(id);
 }
 
@@ -141,22 +201,29 @@ export async function restart(id) {
  * A DATABASE moves out of the way: nothing links to `localhost:3306` from a
  * bookmark, the connection string comes from the dashboard, and refusing to
  * start because some other MySQL is running would be an obstacle rather than a
- * safeguard. A WEB SERVER does not move, because its port is in every URL the
- * user has open, and silently answering on 8080 instead of 80 turns "my site is
- * down" into a mystery. So the conflict is reported there and resolved here.
+ * safeguard. A WEB SERVER does not move, because its port is written into the
+ * `listen` line of every generated vhost - moving it here would leave the
+ * process and its own configuration disagreeing - and because its port is in
+ * every URL the user has open. So the conflict is reported there and resolved
+ * here.
+ *
+ * Which port a web server wants is `ports.js`'s answer, not this file's: the
+ * active server keeps the configured pair and a second installed one takes a
+ * fixed offset, so both can run at once.
  *
  * @param {string} id
  * @returns {Promise<number>}
  */
 async function choosePort(id) {
-  const isWebServer = id === "nginx" || id === "apache";
-  const wanted = isWebServer ? config.httpPort : defaultPortFor(id);
+  const wanted = plannedPort(id);
   if (!(await inUse(wanted))) return wanted;
 
-  if (isWebServer) {
+  if (isWebServer(id)) {
     // Starting anyway fails with an opaque bind error deep in a log file.
     throw new Error(
-      `Port ${wanted} is already in use. Stop whatever is serving it, or change the HTTP port in Settings.`,
+      id === config.webServer
+        ? `Port ${wanted} is already in use. Stop whatever is serving it, or change the HTTP port in Settings.`
+        : `Port ${wanted} is already in use. ${id} runs there because ${config.webServer} is the default web server and holds the configured port.`,
     );
   }
 
@@ -177,54 +244,50 @@ async function choosePort(id) {
  */
 
 /**
- * Write the web server's configuration before it is asked to read it.
- *
- * Every other service has an `init` that creates what it needs - mysqld its data
- * directory, redis its conf - and the web servers had none, because their config
- * is written by `generate()` on "Apply changes" or when a project is added. On a
- * freshly set-up environment neither has happened, so `nginx -c <path>` pointed
- * at a file in an empty `conf/` directory and the process exited before the
- * first status poll. The error even sent the user to a log that did not exist:
- * "nginx exited immediately. Check <root>\logs\nginx.log".
- *
- * Idempotent and cheap - it rewrites the vhosts from the current project list,
- * which is what starting a server should do anyway.
- *
- * @returns {Promise<void>}
- */
-async function writeServerConfig() {
-  await generate(state.projects);
-}
-
-/**
  * How each service is launched.
  *
- * @param {string} id @param {string} binDir @param {string} version
+ * Every service has an `init` that creates what it needs before the process is
+ * asked to read it - mysqld its data directory, redis its conf, and the web
+ * servers their whole generated tree. The web servers had none, because their
+ * config was written by `generate()` on "Apply changes" or when a project was
+ * added; on a freshly set-up environment neither had happened, so
+ * `nginx -c <path>` pointed at a file in an empty `conf/` directory and the
+ * process exited before the first status poll. Regenerating here is idempotent
+ * and cheap, and it is what starting a server should do anyway.
+ *
+ * @param {import("../runtime.js").InstalledVersion} row
+ * @param {string} id
  * @param {number} port  Resolved by `choosePort`, which may have moved it.
  * @returns {Promise<StartPlan>}
  */
-async function planFor(id, binDir, version, port) {
+async function planFor(id, row, port) {
+  const { binDir, version } = row;
   const dataDir = paths.data(id, version);
   const logFile = join(paths.logs(), `${id}.log`);
 
   switch (id) {
-    case "nginx": {
-      const row = resolveVersion("nginx", version);
+    case "nginx":
       return {
-        program: join(binDir, `nginx${exeSuffix()}`),
-        // -p is the PREFIX nginx resolves `mime.types` and `fastcgi_params`
-        // against, so it must be nginx's own install directory even though the
-        // config we hand it with -c is ours.
-        args: ["-p", row?.dir ?? binDir, "-c", join(paths.conf("nginx"), "nginx.conf")],
-        init: writeServerConfig,
+        program: await serverExe("nginx", row),
+        // -p is the PREFIX for anything still relative, which is only nginx's
+        // own temp directories: everything the generated config names is
+        // absolute. So it points at OUR `internal/`, which is writable on every
+        // platform and is where that scratch belongs, rather than at nginx's
+        // install directory - which for a system nginx is `/usr/sbin` and
+        // cannot be written to at all.
+        args: ["-p", paths.internal(), "-c", join(paths.conf("nginx"), "nginx.conf")],
+        init: async () => {
+          await generate(state.projects, "nginx");
+        },
       };
-    }
 
     case "apache":
       return {
-        program: join(binDir, `httpd${exeSuffix()}`),
+        program: await serverExe("apache", row),
         args: ["-f", join(paths.conf("apache"), "httpd.conf"), "-D", "FOREGROUND"],
-        init: writeServerConfig,
+        init: async () => {
+          await generate(state.projects, "apache");
+        },
       };
 
     case "mysql":
@@ -257,10 +320,11 @@ async function planFor(id, binDir, version, port) {
         init: async () => {
           if (await isInitialised(dataDir)) return;
           await mkdirp(dataDir);
-          // initdb refuses to run as root and needs the password file to exist
-          // before it is read, so write it first.
-          const pwFile = join(paths.run(), "pg-init-pass");
-          await writeText(pwFile, "postgres\n");
+          // `-A trust` and no password, which is what a loopback-only local
+          // development database wants. There was a `run/pg-init-pass` written
+          // here with `postgres` in it, on a comment claiming initdb needed the
+          // file to exist first; initdb was never given `--pwfile`, so it was a
+          // plaintext password nothing read and nothing removed.
           const res = await run(
             join(binDir, `initdb${exeSuffix()}`),
             ["-D", dataDir, "-U", "postgres", "-A", "trust", "--encoding=UTF8"],
@@ -429,6 +493,11 @@ export function runningPhpPools() {
  */
 export async function refreshStatuses() {
   for (const id of SERVICE_IDS) {
+    // No handle to ask about; the timer either exists or it does not.
+    if (IN_PROCESS.has(id)) {
+      setStatus(id, { state: isCronRunning() ? "running" : "stopped" });
+      continue;
+    }
     const s = statusOf(id);
     if (s.state === "running" && s.handle !== null && !(await isAlive(s.handle))) {
       setStatus(id, { state: "stopped", handle: null });
@@ -441,6 +510,12 @@ export async function refreshStatuses() {
 export async function stopAll() {
   await stopPhpPools();
   for (const id of SERVICE_IDS) {
+    // The in-process ones have no handle, so the test below would skip them
+    // forever and leave a scheduler firing after the extension was disabled.
+    if (IN_PROCESS.has(id)) {
+      await stop(id).catch(() => {});
+      continue;
+    }
     const s = state.services.get(id);
     if (s?.handle !== null && s?.handle !== undefined) await stop(id).catch(() => {});
   }
@@ -461,8 +536,9 @@ export async function startAll() {
   // one failing never stops the rest - a MySQL data directory that will not
   // initialise must not cost you Redis.
   for (const id of SERVICE_IDS) {
-    if (id === "nginx" || id === "apache") continue;
-    if (installedOf(id).length === 0) continue;
+    if (isWebServer(id)) continue;
+    // Nothing to install means the check below would skip it every time.
+    if (!IN_PROCESS.has(id) && installedOf(id).length === 0) continue;
     await start(id).catch(() => {});
   }
 }

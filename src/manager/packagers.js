@@ -16,9 +16,9 @@
 // surprise, not a service.
 
 import { join } from "../core/paths.js";
-import { exists, readJson } from "../core/fsx.js";
+import { exists } from "../core/fsx.js";
 import { run, which, probe } from "../core/proc.js";
-import { isWindows, exeSuffix } from "../runtime.js";
+import { isWindows } from "../runtime.js";
 import { resolveVersion } from "./versions.js";
 
 /**

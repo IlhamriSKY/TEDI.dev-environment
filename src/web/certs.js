@@ -29,8 +29,13 @@ import { mkcert } from "../registry/mkcert.js";
  * @typedef {object} CertPair
  * @property {string} cert  Absolute path to the certificate.
  * @property {string} key   Absolute path to the private key.
- * @property {boolean} trusted  False when it was self-signed as a fallback.
  */
+
+// There was a `trusted` field here and nothing ever read it. It cost a
+// `mkcert -CAROOT` SUBPROCESS on the cached path, which `generate()` walks once
+// per project per web server - so publishing five projects spawned ten
+// processes to answer a question with no asker. Whether the local CA is trusted
+// is `httpsStatus()`'s job, asked once, where the dashboard actually shows it.
 
 /** The mkcert binary, downloaded or on PATH, or null.
  *  @returns {Promise<string | null>} */
@@ -139,21 +144,19 @@ export async function certificateFor(domains) {
   const cert = join(dir, `${name}.pem`);
   const key = join(dir, `${name}-key.pem`);
 
-  if ((await exists(cert)) && (await exists(key))) {
-    return { cert, key, trusted: await caInstalled() };
-  }
+  if ((await exists(cert)) && (await exists(key))) return { cert, key };
 
   const exe = await mkcertPath();
   if (exe) {
     const res = await run(exe, ["-cert-file", cert, "-key-file", key, ...domains], {
       timeoutMs: 60_000,
     });
-    if (res.code === 0) return { cert, key, trusted: true };
+    if (res.code === 0) return { cert, key };
     warn("mkcert failed to issue a certificate", res.out);
   }
 
   const fallback = await selfSign(domains, cert, key);
-  return fallback ? { cert, key, trusted: false } : null;
+  return fallback ? { cert, key } : null;
 }
 
 /**

@@ -174,13 +174,23 @@ async function extras(version) {
   return fpm ? [fpm] : [];
 }
 
-/** @param {string} version @returns {Promise<import("./index.js").Layout>} */
+/**
+ * Both shapes are FLAT, which is why there is no platform branch here.
+ *
+ * The Windows zip is flat by construction: `php.exe` sits at the root next to
+ * `ext/`. static-php-cli's `.tar.gz` holds exactly one file, the `php` binary
+ * itself, with no wrapping directory at all - checked against the real archive,
+ * not assumed. This used to claim a `bin/` subdirectory on macOS and Linux
+ * "which the installer places", and no such step existed: the binary landed at
+ * the root, `layout()` looked for it one level down, `verify()` warned, and
+ * `scanInstalled` skipped the row - so a downloaded PHP was invisible on two of
+ * the three platforms this extension claims to support.
+ *
+ * @param {string} version @returns {Promise<import("./index.js").Layout>}
+ */
 async function layout(version) {
   const dir = paths.runtime("php", version);
-  // Windows ships a flat zip: php.exe sits at the root next to ext/.
-  // static-php-cli ships a single binary, which the installer places in bin/.
-  const binDir = isWindows() ? dir : join(dir, "bin");
-  return { binDir, exe: join(binDir, `php${exeSuffix()}`) };
+  return { binDir: dir, exe: join(dir, `php${exeSuffix()}`) };
 }
 
 /** Directory holding loadable extension binaries for a Windows install.
@@ -190,11 +200,14 @@ export function phpExtDir(version) {
 }
 
 /** The FastCGI executable the web server should talk to, per platform.
- *  Windows has php-cgi.exe; elsewhere it is php-fpm from the extras download.
+ *  Windows has php-cgi.exe; elsewhere it is php-fpm, which arrives as its own
+ *  archive holding one bare `php-fpm` binary and is merged into the same flat
+ *  install directory as the CLI. Both sit beside `php`, for the reason
+ *  `layout()` gives.
  *  @param {string} version @returns {string} */
 export function phpFastCgi(version) {
   const dir = paths.runtime("php", version);
-  return isWindows() ? join(dir, "php-cgi.exe") : join(dir, "bin", "php-fpm");
+  return join(dir, isWindows() ? "php-cgi.exe" : "php-fpm");
 }
 
 /** Can extensions be added to this install after the fact? Only Windows builds

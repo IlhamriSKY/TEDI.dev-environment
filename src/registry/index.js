@@ -47,6 +47,12 @@
  *   release across several files (PHP ships cli and fpm separately off Windows).
  * @property {(version: string) => Promise<Layout>} layout
  * @property {string[]} [systemBin]  Executable names to look for on PATH.
+ * @property {string[]} [versionArgs]  How to ask this binary its version.
+ *   Defaults to `--version`, which the runtimes and tools all accept and the
+ *   servers and databases do not: `httpd --version` and `nginx --version` are
+ *   usage errors, and `mysqld -v` is not a version flag at all - it is verbosity
+ *   on a command that would then try to START the server. So this is declared
+ *   per provider rather than probed by trying flags until one works.
  * @property {string} [packageHint]  What to tell the user when nothing is available.
  * @property {number} [defaultPort]
  */

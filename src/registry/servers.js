@@ -15,7 +15,7 @@
 import { fetchText } from "../core/net.js";
 import { paths, join } from "../core/paths.js";
 import { isWindows, exeSuffix } from "../runtime.js";
-import { compareVersions, osKey } from "./util.js";
+import { compareVersions } from "./util.js";
 
 /** @typedef {import("./index.js").VersionInfo} VersionInfo */
 /** @typedef {import("./index.js").Download} Download */
@@ -72,6 +72,7 @@ export const nginx = {
   download: nginxDownload,
   layout: nginxLayout,
   systemBin: ["nginx"],
+  versionArgs: ["-v"],
   packageHint: "brew install nginx  |  apt install nginx",
 };
 
@@ -86,19 +87,43 @@ const LOUNGE_PAGE = "https://www.apachelounge.com/download/";
  *  fails to install. @type {Map<string, string> | null} */
 let loungeIndex = null;
 
+/**
+ * The archive links on the download page, as `version -> URL`.
+ *
+ * Pure and exported so the pattern can be checked against a real page snippet
+ * without the network. It has already been wrong once in a way nothing caught:
+ * the page spells the file `httpd-2.4.68-260827-Win64-VS18.zip` with a capital
+ * W, the pattern matched a lowercase `win64` with no `i` flag, and so it found
+ * ZERO builds. That is not a visible failure - an empty index reads exactly
+ * like "this platform has no build", which is the honest answer for macOS and
+ * Linux, so on Windows Apache silently reported itself unavailable and never
+ * installed. Case is a property of one publisher's filename convention and it
+ * is the kind of thing that changes without notice, hence `i`.
+ *
+ * `win64` stays literal so the 32-bit build next to it can never match.
+ *
+ * @param {string} html
+ * @returns {Map<string, string>}
+ */
+export function parseLoungeIndex(html) {
+  /** @type {Map<string, string>} */
+  const map = new Map();
+  // e.g. /download/VS18/binaries/httpd-2.4.68-260827-Win64-VS18.zip
+  for (const m of html.matchAll(
+    /((?:\/download\/)?VS\d+\/binaries\/httpd-(\d+\.\d+\.\d+)-[\w-]*win64-VS\d+\.zip)/gi,
+  )) {
+    const rel = m[1].startsWith("/") ? m[1] : `/download/${m[1]}`;
+    map.set(m[2], `https://www.apachelounge.com${rel}`);
+  }
+  return map;
+}
+
 /** @returns {Promise<Map<string, string>>} */
 async function apacheIndex() {
   if (loungeIndex) return loungeIndex;
-  const map = new Map();
+  let map = new Map();
   try {
-    const html = await fetchText(LOUNGE_PAGE, { timeoutMs: 30_000 });
-    // e.g. /download/VS17/binaries/httpd-2.4.62-240904-win64-VS17.zip
-    for (const m of html.matchAll(
-      /((?:\/download\/)?VS\d+\/binaries\/httpd-(\d+\.\d+\.\d+)-[\w-]*win64-VS\d+\.zip)/g,
-    )) {
-      const rel = m[1].startsWith("/") ? m[1] : `/download/${m[1]}`;
-      map.set(m[2], `https://www.apachelounge.com${rel}`);
-    }
+    map = parseLoungeIndex(await fetchText(LOUNGE_PAGE, { timeoutMs: 30_000 }));
   } catch {
     /* leave the map empty; callers treat that as "no builds found" */
   }
@@ -151,5 +176,6 @@ export const apache = {
   download: apacheDownload,
   layout: apacheLayout,
   systemBin: ["httpd", "apache2"],
+  versionArgs: ["-v"],
   packageHint: "brew install httpd  |  apt install apache2",
 };

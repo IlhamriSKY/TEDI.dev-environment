@@ -1,11 +1,11 @@
 # Dev Environment for TEDI
 
-A complete local development environment, managed from inside TEDI. The Laragon
-replacement, on Windows, macOS and Linux.
+A complete local development environment, managed from inside TEDI, on Windows,
+macOS and Linux.
 
 It downloads and manages its own PHP, Node.js, MySQL, PostgreSQL, Redis, Nginx,
-Apache, Composer and mkcert. Nothing is shared with an existing Laragon, XAMPP
-or Homebrew install unless you ask it to use one.
+Apache, Composer and mkcert. Nothing is shared with a stack you already have
+installed unless you ask it to use one.
 
 ```
 tedi ext install IlhamriSKY/tedi.dev-environment
@@ -23,6 +23,11 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
 - **Virtual hosts with HTTPS.** Every project gets `name.test` (or whatever
   suffix you choose), a generated vhost, a certificate from a local CA, and a
   hosts entry written for you.
+- **Nginx and Apache, side by side.** Both get installed. The one you pick in
+  Settings keeps the ports you configured, because those are the numbers in your
+  URLs; the other takes a fixed offset — 80 and 443 become 8080 and 8443 — so
+  both can run and trying one never means stopping the other. Each writes its
+  own virtual hosts.
 - **Databases as services.** MySQL, PostgreSQL and Redis start, stop and
   initialise their data directories from the dashboard.
 - **PHP extensions and Xdebug** on Windows, with compatibility filtering: only
@@ -34,19 +39,26 @@ The pane shows a three-step checklist and **nothing else** until all three are
 done. Each is one click, and none of them can strand you.
 
 1. **Root folder.** Pick one folder — `D:\tedi`, say — and the runtimes, your
-   projects (`www/`), the databases, certificates and logs all live under it, the
-   way Laragon keeps everything in one place. A native folder picker, not a typed
-   path.
+   projects (`www/`), the databases, certificates and logs all live under it, so
+   the root is the whole environment and there is one path to back up or move. A
+   native folder picker, not a typed path.
 2. **Install everything.** Downloads the current stable release of every
    component this platform has a build for, and trusts the local certificate
    authority so `https://` loads without a warning. Anything with no build here
    is reported as such rather than retried.
-3. **Terminal PATH.** Registers the shims folder first on TEDI's terminal PATH,
-   which is what makes `php` resolve to the project's version instead of whatever
-   else your system finds first. Any folder holding a competing `php`, `node` or
-   `composer` is switched **off**, not deleted — you can turn it back on in
-   _Settings → Terminal → Additional PATH_, where the row says which extension
-   added or disabled it.
+3. **Terminal PATH.** _Optional._ Registers the shims folder first on TEDI's
+   terminal PATH, which is what makes `php` resolve to the project's version
+   instead of whatever else your system finds first. Any folder holding a
+   competing `php`, `node` or `composer` is switched **off**, not deleted — you
+   can turn it back on in _Settings → Terminal → Additional PATH_, where the row
+   says which extension added or disabled it.
+
+   Press **Not now** if you have your own PHP on the PATH with something running
+   against it. Everything else here works either way; only terminals are
+   affected. The row stays on the checklist, so you can register it whenever you
+   want.
+
+Only the first two steps gate the panel.
 
 Everything after that is automatic. Adding a project writes its virtual host,
 issues its certificate and syncs the hosts file — under a single administrator
@@ -66,16 +78,46 @@ Highest wins:
 The decision is written to `.tedi-runtime` in the project folder, which is what
 the shims read. Add it to your `.gitignore`.
 
+## Scheduled jobs
+
+A cron of your own, in the **Cron** section. It runs while the environment does,
+which is the point: a development scheduler that fires when you are not working
+is a scheduler that surprises you.
+
+```
+* * * * *     php artisan schedule:run      in D:\DEV ENV\www\my-app
+*/5 * * * *   php artisan queue:work --stop-when-empty
+0 3 * * *     npm run backup
+```
+
+Real five-field cron expressions, plus `@daily`, `@hourly`, `@weekly` and
+`@monthly`. `php`, `node`, `npm` and `composer` in a job resolve to the version
+its **folder** asks for, exactly as a terminal opened there would, so a job in a
+project pinned to PHP 8.3 runs 8.3.
+
+Each row shows what the last run did — exit code, when, and the tail of the
+output when it failed — and **Run now** runs it immediately so you can test a
+schedule without waiting for it.
+
+The command is an argument list, not a shell line: a path with a space in it
+cannot split in two, and a pipe or a redirect belongs in a script the job calls.
+
 ## Where things live
 
 Under the root folder you picked in step 1, and nowhere else:
 
 ```
-<root>/runtimes/   php, node, composer          <root>/www/      your projects
-<root>/servers/    nginx, apache                <root>/certs/    the local CA + per-site certs
-<root>/services/   mysql, postgres, redis       <root>/conf/     generated vhosts and server config
-<root>/shims/      what the terminal PATH sees  <root>/logs/     what each service wrote
+<root>/www/         your projects           <root>/data/      the databases
+<root>/runtimes/    php, node, composer     <root>/logs/      what each service wrote
+<root>/servers/     nginx, apache           <root>/internal/  everything generated
+<root>/services/    mysql, postgres, redis
 ```
+
+`internal/` holds the shims, the certificates, the generated server config, the
+metadata cache and the download staging area. Nothing in it is yours to edit and
+all of it is rebuilt, which is why it is one folder instead of eight at the top
+level. An environment created before this release is moved into the new shape
+once, on the next launch, and the terminal PATH entry moves with it.
 
 Nothing is installed into the system, so moving or deleting that one folder is
 the whole uninstall. The two exceptions are stated where they happen and both

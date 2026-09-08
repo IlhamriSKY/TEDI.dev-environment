@@ -17,7 +17,7 @@
 
 import { fetchJson } from "../core/net.js";
 import { paths, join } from "../core/paths.js";
-import { isWindows, exeSuffix } from "../runtime.js";
+import { exeSuffix } from "../runtime.js";
 import { osKey, shortArch } from "./util.js";
 
 const RELEASES = "https://api.github.com/repos/FiloSottile/mkcert/releases/latest";
@@ -64,8 +64,10 @@ async function versions() {
   }
 }
 
-/** @param {string} version @returns {Promise<Download | null>} */
-async function download(version) {
+/** The version is not part of the URL: the asset comes off the release this
+ *  provider already resolved, which is always the latest.
+ *  @param {string} _version @returns {Promise<Download | null>} */
+async function download(_version) {
   const rel = await latest().catch(() => null);
   if (!rel) return null;
   const { frag } = target();
@@ -74,8 +76,8 @@ async function download(version) {
   return { url: asset.browser_download_url, file: asset.name };
 }
 
-/** @param {string} version @returns {Promise<import("./index.js").Layout>} */
-async function layout(version) {
+/** @param {string} _version @returns {Promise<import("./index.js").Layout>} */
+async function layout(_version) {
   // A single binary, so it lives in tools/ rather than a versioned tree: there
   // is no reason to keep two mkcerts, and the CA it manages is per machine, not
   // per version.

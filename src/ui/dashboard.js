@@ -12,10 +12,11 @@
 // state and the one control that fixes it, and until all three hold the rest of
 // the panel is not drawn at all.
 
-import { h, button, muted, section, row, pill, icon, dot } from "./el.js";
+import { h, button, muted, section, row, pill, icon, status, progress } from "./el.js";
 import { runtimesView } from "./runtimes-view.js";
 import { servicesView } from "./services-view.js";
 import { projectsView } from "./projects-view.js";
+import { cronView } from "./cron-view.js";
 import { state, config, ctx } from "../runtime.js";
 import { paths, layoutDirs } from "../core/paths.js";
 import { ensureDirs, isDir } from "../core/fsx.js";
@@ -23,7 +24,7 @@ import { openFolder } from "../core/proc.js";
 import { shimDir, writeShims } from "../project/shims.js";
 import { scanInstalled, installedOf } from "../manager/versions.js";
 import { applyRuntimeChange } from "../manager/apply.js";
-import { writeSetting } from "../manager/config.js";
+import { writeSetting, setSkipTerminalPath } from "../manager/config.js";
 import { CROSS_PLATFORM } from "../manager/defaults.js";
 import { installEverything } from "./install-all.js";
 import { provider } from "../registry/index.js";
@@ -94,7 +95,7 @@ async function paint(root, refresh, current) {
 
   const steps = await setupSteps(refresh);
   if (!current()) return;
-  const blocked = steps.filter((s) => !s.note && !s.done);
+  const blocked = steps.filter((s) => !s.note && !s.optional && !s.done);
 
   // Nothing else is drawn until setup is finished. Disabling every control
   // instead would leave a panel full of buttons that explain, one at a time,
@@ -116,7 +117,7 @@ async function paint(root, refresh, current) {
   // appended when it resolves rather than holding the whole panel blank.
   const projects = await projectsView(refresh);
   if (!current()) return;
-  root.append(projects);
+  root.append(projects, cronView(refresh));
 }
 
 /**
@@ -169,23 +170,26 @@ function setupCard(steps, blocked) {
  * @property {string} icon
  * @property {boolean} [note]  A warning to read, not a step to finish: it never
  *                             blocks the panel and is never counted.
+ * @property {boolean} [optional]  Still a step, still counted, but the panel
+ *   opens without it. For a step whose answer is legitimately "no thanks".
  * @property {Node} [aside]    The control that completes it.
  * @property {Node} [tag]
+ * @property {Node} [bar]      Progress, drawn flush under the row.
  */
 
 /**
  * One setup step, in the same row the rest of the panel uses.
  *
- * A status dot and an icon, exactly like a service row or a project row - not a
- * numbered badge. The panel already had a vocabulary for "here is a thing and
+ * A status glyph and an icon, exactly like a service row or a project row - not
+ * a numbered badge. The panel already had a vocabulary for "here is a thing and
  * its state"; a checklist that invents its own is one more shape to learn for
  * no information gained.
  *
  * @param {Step} step @returns {HTMLElement}
  */
 function stepRow(step) {
-  return row([
-    dot(step.note ? "warn" : step.done ? "ok" : "idle"),
+  const line = row([
+    status(step.note ? "warn" : step.done ? "ok" : "idle"),
     icon(step.icon, step.done ? "var(--primary)" : "var(--muted-foreground)"),
     h("div", { style: "display:flex;flex-direction:column;gap:1px;flex:1;min-width:0" }, [
       h("span", { style: "display:flex;align-items:center;gap:6px" }, [
@@ -196,6 +200,10 @@ function stepRow(step) {
     step.tag ?? null,
     step.aside ?? null,
   ]);
+  if (!step.bar) return line;
+  // Flush under its own row rather than in a status area of its own, so which
+  // step is working is answered by WHERE the bar is and needs no label.
+  return h("div", { style: "display:flex;flex-direction:column;min-width:0" }, [line, step.bar]);
 }
 
 /** @param {() => void} refresh @param {boolean} ready @returns {HTMLElement} */
@@ -261,10 +269,45 @@ async function applyEverything(refresh) {
 }
 
 /**
+ * The one setup answer that costs a subprocess.
+ *
+ * `httpsStatus()` shells out to `mkcert -CAROOT`, and the panel repaints on
+ * every user action as well as on a changed poll - so without this, starting a
+ * service or toggling a project each spawned a process to re-answer a question
+ * nothing had changed. During "install everything" it was far worse: progress
+ * reports a new percentage up to a hundred times per component.
+ *
+ * Held in two cases, and both are safe because the answer cannot change while
+ * they hold:
+ *
+ *   - while an install is running, because a download does not touch the trust
+ *     store;
+ *   - once the CA is TRUSTED, because trust is monotonic - nothing here and
+ *     nothing in mkcert untrusts a CA - so the positive answer is final for the
+ *     session. A negative one is always re-asked, which is what makes the
+ *     "Trust certificate" button take effect on the very next paint.
+ *
+ * The terminal-PATH answer is deliberately NOT cached with it. It is cheap on
+ * any host that has `ctx.terminal` (an in-memory list, no process), and it
+ * changes the moment the user presses Register - so freezing it alongside would
+ * leave that button doing nothing visible.
+ *
+ * @type {Awaited<ReturnType<typeof httpsStatus>> | null}
+ */
+let httpsProbe = null;
+
+/**
  * The setup checklist.
  *
- * Three steps, all REQUIRED, all inside this extension's reach: pick a folder,
- * press a button, paste one path. Nothing here can strand a user.
+ * Three steps, all inside this extension's reach: pick a folder, press a
+ * button, and decide about the terminal PATH. Nothing here can strand a user.
+ *
+ * Only the first two GATE the panel. Registering the shim directory is a real
+ * step with a real button, but a user who already has a php on their PATH and
+ * something running against it has a good reason to leave it exactly where it
+ * is, and everything else here - the dashboard, the virtual hosts, HTTPS, the
+ * databases - works without it. A checklist that refuses to open until you
+ * agree to change your PATH is asking for consent it does not need.
  *
  * Trusting the local CA and writing the hosts file used to be steps four and
  * five. They are not steps any more, and that is the point: the CA is installed
@@ -292,17 +335,27 @@ async function setupSteps(refresh) {
     (id) => !installedOf(id).some((r) => r.origin === "download"),
   );
 
-  // Whatever the installer is doing right now, named. `state.busy` is keyed by
+  // Whatever the installer is doing right now. `state.busy` is keyed by
   // component id and only one install runs at a time, so the first entry is the
   // one in flight. While the gate is up this is the ONLY progress on screen,
   // because the Runtimes rows that normally carry it are behind the gate.
-  const [busyId, busyText] = [...state.busy.entries()][0] ?? [];
-  const busy = busyId ? `${provider(busyId)?.label ?? busyId}: ${busyText}` : "";
+  const [busyId, busyState] = [...state.busy.entries()][0] ?? [];
+  const busy = busyState
+    ? [
+        `${provider(busyId ?? "")?.label ?? busyId}: ${busyState.text}`,
+        busyState.pct === undefined ? "" : ` ${busyState.pct}%`,
+        busyState.total ? ` · ${busyState.step} of ${busyState.total}` : "",
+      ].join("")
+    : "";
 
   const shims = shimDir();
   const onPath = await pathOnTerminal(shims);
+  if (!httpsProbe || (!busyState && httpsProbe.trusted !== true)) {
+    httpsProbe = await httpsStatus();
+  }
+  const https = httpsProbe;
   const names = CROSS_PLATFORM.map((id) => provider(id)?.label ?? id).join(", ");
-  const https = await httpsStatus();
+  const pathSkipped = config.skipTerminalPath === true;
 
   /** @type {Step[]} */
   const steps = [
@@ -314,7 +367,7 @@ async function setupSteps(refresh) {
         ? "Holds runtimes, www (your projects), databases, certificates and logs."
         : configured
           ? `${paths.root()} could not be created. Pick another folder.`
-          : "One folder for the runtimes, www (your projects), databases and certificates, the way Laragon keeps everything under one root.",
+          : "One folder for the runtimes, www (your projects), databases and certificates, so the root is the whole environment and there is one path to back up or move.",
       tag: chosen ? pill(paths.root()) : undefined,
       aside: h("div", { style: "display:flex;gap:5px" }, [
         chosen
@@ -353,6 +406,10 @@ async function setupSteps(refresh) {
                 // than spliced into a clause - that produced "not been trusted
                 // yet., so https will warn".
                 `${names} installed. ${(https.reason ?? "The local certificate authority is not trusted.").replace(/\.?$/, ".")} Sites will load over https with a browser warning until it is.`,
+      // Drawn flush under this row while anything is downloading, because this
+      // is the row the work belongs to. A percentage in the text alone is a
+      // number to read; the bar is the thing you can glance at.
+      bar: busyState ? progress(busyState.pct) : undefined,
       aside: busy
         ? undefined
         : chosen && missing.length > 0
@@ -373,30 +430,52 @@ async function setupSteps(refresh) {
       title: "Terminal PATH",
       icon: "lucide:SquareTerminal",
       done: onPath,
+      // Never blocks. Once declined it stops being counted as outstanding too,
+      // because the answer was given - repeating the question on every launch
+      // is how a checklist turns into nagging.
+      optional: !onPath && !pathSkipped,
+      note: !onPath && pathSkipped,
       detail: onPath
         ? `TEDI terminals run the php, node and composer from this environment. Change it any time in ${pathInstruction()}.`
-        : canRegisterPath()
-          ? `Puts this environment first on TEDI's terminal PATH, so typing "php" runs the PHP above instead of whatever else your system finds first. Any folder holding a competing php, node or composer is switched OFF, not deleted - you can turn it back on in ${pathInstruction()}.`
-          : `Registers this environment with TEDI's terminals, so typing "php" runs the PHP above. Paste this folder into ${pathInstruction()} → Add folder, then reopen your terminals.`,
+        : pathSkipped
+          ? `Left alone, so your terminals keep resolving the php, node and composer they already find. Everything else here works without it - only the terminal is unaffected. Register whenever you want this environment's runtimes on the PATH.`
+          : canRegisterPath()
+            ? `Puts this environment first on TEDI's terminal PATH, so typing "php" runs the PHP above instead of whatever else your system finds first. Any folder holding a competing php, node or composer is switched OFF, not deleted - you can turn it back on in ${pathInstruction()}. Leave it alone if you have something already running against your own PHP.`
+            : `Registers this environment with TEDI's terminals, so typing "php" runs the PHP above. Paste this folder into ${pathInstruction()} → Add folder, then reopen your terminals.`,
       tag: pill(shims),
       aside: onPath
         ? undefined
-        : canRegisterPath()
-          ? button("Register", () => void registerPath(refresh), {
-              icon: "lucide:PlugZap",
-              variant: "primary",
-            })
-          : // Older host with no `ctx.terminal`: the paste is still the answer.
-            button(
-              "Copy path",
-              async () => {
-                await navigator.clipboard.writeText(shims).catch(() => {});
-                ctx?.ui.toast(`Shim folder copied. Paste it into ${pathInstruction()}.`, {
-                  variant: "info",
-                });
-              },
-              { icon: "lucide:Copy", variant: "primary" },
-            ),
+        : h("div", { style: "display:flex;gap:5px" }, [
+            canRegisterPath()
+              ? button("Register", () => void registerPath(refresh), {
+                  icon: "lucide:PlugZap",
+                  variant: "primary",
+                })
+              : // Older host with no `ctx.terminal`: the paste is still the answer.
+                button(
+                  "Copy path",
+                  async () => {
+                    await navigator.clipboard.writeText(shims).catch(() => {});
+                    ctx?.ui.toast(`Shim folder copied. Paste it into ${pathInstruction()}.`, {
+                      variant: "info",
+                    });
+                  },
+                  { icon: "lucide:Copy", variant: "primary" },
+                ),
+            pathSkipped
+              ? null
+              : button(
+                  "Not now",
+                  async () => {
+                    await setSkipTerminalPath(true);
+                    refresh();
+                  },
+                  {
+                    title:
+                      "Leave your terminal PATH exactly as it is. This row stays here, so you can register it later.",
+                  },
+                ),
+          ]),
     },
   ];
 
@@ -423,8 +502,8 @@ async function setupSteps(refresh) {
  * Register the shim folder on the terminal PATH.
  *
  * Names what it switched off rather than doing it quietly: the user is about to
- * find that their Laragon php is no longer what a terminal resolves, and they
- * should read that here rather than discover it.
+ * find that the php their terminals used to resolve is no longer the one they
+ * get, and they should read that here rather than discover it.
  *
  * @param {() => void} refresh @returns {Promise<void>}
  */
@@ -433,6 +512,9 @@ async function registerPath(refresh) {
   if (!res.ok) {
     ctx?.ui.toast(res.error ?? "The terminal PATH could not be updated.", { variant: "error" });
   } else {
+    // Registering is the undo for "Not now", so the decision is cleared with it
+    // rather than left behind to describe a state that no longer holds.
+    await setSkipTerminalPath(false);
     ctx?.ui.toast(
       res.disabled.length === 0
         ? "This environment is now first on the terminal PATH. Reopen your terminals."

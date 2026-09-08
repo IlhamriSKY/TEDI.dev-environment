@@ -10,7 +10,7 @@
 import { paths, join } from "../core/paths.js";
 import { download as fetchFile } from "../core/net.js";
 import { extract, canExtract } from "../core/archive.js";
-import { mkdirp, move, remove, exists, singleRoot, readDir, isDir } from "../core/fsx.js";
+import { mkdirp, move, remove, exists, singleRoot, subdirs, readDir, isDir } from "../core/fsx.js";
 import { run } from "../core/proc.js";
 import { isWindows, state, warn } from "../runtime.js";
 import { isSafeVersion } from "../registry/util.js";
@@ -55,7 +55,7 @@ function isArchive(file) {
 export async function install(p, version, onProgress) {
   /** @param {string} m @param {number} [pct] */
   const say = (m, pct) => {
-    state.busy.set(p.id, pct === undefined ? m : `${m} ${pct}%`);
+    state.busy.set(p.id, { text: m, ...(pct === undefined ? {} : { pct }) });
     onProgress?.(m, pct);
   };
 
@@ -111,7 +111,7 @@ export async function install(p, version, onProgress) {
     await mkdirp(staging);
     say("Unpacking");
     await extract(archivePath, staging);
-    await unwrap(staging);
+    await unwrap(staging, await relativeExe(p, version, target));
 
     // Further archives that belong in the same tree (PHP's FPM build).
     if (p.extras) {
@@ -156,25 +156,74 @@ export async function install(p, version, onProgress) {
 }
 
 /**
- * Collapse a single wrapping directory, in place.
+ * Where the provider's executable sits inside its own install root.
+ *
+ * This is what makes unwrapping CHECKABLE rather than a guess: the provider
+ * already states where the binary ends up, so the installer can look for it
+ * instead of inferring a strip depth from the archive's shape.
+ *
+ * @param {Provider} p @param {string} version @param {string} target
+ * @returns {Promise<string>} relative path, or "" when it cannot be derived
+ */
+async function relativeExe(p, version, target) {
+  const { exe } = await p.layout(version);
+  if (!exe.startsWith(target)) return "";
+  return exe.slice(target.length).replace(/^[\\/]+/, "");
+}
+
+/**
+ * Collapse a wrapping directory, in place.
  *
  * Nearly every archive here wraps its contents in one versioned folder whose
  * name changes between releases, so the wrapper is DETECTED rather than
  * declared. Doing it here means `layout()` can describe the useful shape
- * (`bin/php`) instead of every provider carrying a strip-depth that is wrong
- * the next time upstream renames something.
+ * instead of every provider carrying a strip-depth that is wrong the next time
+ * upstream renames something.
+ *
+ * The wrapper is now identified by WHERE THE EXECUTABLE IS, not by being the
+ * only child. The old rule - one subdirectory and no files - is what a zip that
+ * carries a readme beside its payload defeats, and the Apache Lounge archive
+ * does exactly that: `Apache24/`, `ReadMe.txt`, `Security.txt` and a build-tag
+ * file at the top level. Nothing was lifted, so the install landed at
+ * `<root>/Apache24/bin/httpd.exe` while `layout()` named `<root>/bin/httpd.exe`,
+ * and Apache silently never appeared as installed.
+ *
+ * Checking for the executable also makes this incapable of damaging an archive
+ * that is ALREADY the right shape, which the old rule could: an archive holding
+ * `bin/` next to a readme would have had `bin/` lifted to the root.
  *
  * @param {string} dir
+ * @param {string} relExe  Where `layout()` says the binary sits, relative to
+ *                         the install root. Empty when the caller has none, in
+ *                         which case the single-wrapper heuristic still applies.
  * @returns {Promise<void>}
  */
-async function unwrap(dir) {
+async function unwrap(dir, relExe = "") {
+  if (relExe) {
+    // Already the shape `layout()` describes.
+    if (await exists(join(dir, relExe))) return;
+    for (const name of await subdirs(dir)) {
+      if (await exists(join(dir, name, relExe))) return await lift(dir, name);
+    }
+  }
+  // No executable to aim at - an extras archive, or a provider whose binary
+  // arrives in a later download. Fall back to the shape rule.
   const only = await singleRoot(dir);
-  if (!only) return;
-  const inner = join(dir, only);
+  if (only) await lift(dir, only);
+}
+
+/**
+ * Replace `dir` with its child `name`, keeping the path.
+ *
+ * Rename the inner directory OUT, drop the wrapper and whatever else was beside
+ * it, rename back. Moving children one by one would be slower and would
+ * half-finish on error.
+ *
+ * @param {string} dir @param {string} name @returns {Promise<void>}
+ */
+async function lift(dir, name) {
   const lifted = `${dir}-lift-${Date.now()}`;
-  // Rename the inner directory OUT, drop the now-empty wrapper, rename back.
-  // Moving children one by one would be slower and would half-finish on error.
-  await move(inner, lifted);
+  await move(join(dir, name), lifted);
   await remove(dir);
   await move(lifted, dir);
 }
@@ -244,7 +293,9 @@ export async function verify(p, version) {
   // reporting that as "installed but did not answer" is a false alarm about a
   // perfectly good Composer.
   if (/\.phar$/i.test(exe)) return true;
-  const res = await run(exe, ["--version"], { timeoutMs: 15_000 }).catch(() => null);
+  const res = await run(exe, p.versionArgs ?? ["--version"], { timeoutMs: 15_000 }).catch(
+    () => null,
+  );
   return Boolean(res && res.code === 0);
 }
 

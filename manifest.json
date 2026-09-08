@@ -2,8 +2,8 @@
   "$schema": "./manifest.schema.json",
   "id": "tedi.devenv",
   "name": "Dev Environment",
-  "version": "0.1.0",
-  "description": "A complete local development environment managed from inside TEDI: the Laragon replacement, on Windows, macOS and Linux. Downloads and manages its own PHP, Node.js, MySQL, MariaDB, PostgreSQL, Redis, Nginx, Apache and Composer, none of it shared with anything already on the machine. PHP and Node.js install side by side at any number of versions, and a project pins its own without touching the global default, so a terminal opened in that project resolves the runtime the project asked for. Virtual hosts are generated per project with a configurable suffix, HTTPS is issued from a local CA that is trusted once, hosts entries are written for you under a single elevation prompt, and ports are allocated around whatever is already listening. Nothing is hardcoded: every version list, download URL and path is metadata resolved at runtime.",
+  "version": "0.1.2",
+  "description": "A complete local development environment managed from inside TEDI, on Windows, macOS and Linux. Downloads and manages its own PHP, Node.js, MySQL, MariaDB, PostgreSQL, Redis, Nginx, Apache and Composer, none of it shared with anything already on the machine. PHP and Node.js install side by side at any number of versions, and a project pins its own without touching the global default, so a terminal opened in that project resolves the runtime the project asked for. Virtual hosts are generated per project with a configurable suffix, HTTPS is issued from a local CA that is trusted once, hosts entries are written for you under a single elevation prompt, and ports are allocated around whatever is already listening. Scheduled jobs run on real cron expressions and resolve each job's runtime from the folder it runs in. Nothing is hardcoded: every version list, download URL and path is metadata resolved at runtime.",
   "author": "IlhamRiski - ilhamriski.com",
   "homepage": "https://tedi.ilhamriski.com/",
   "icon": "logo.png",
@@ -16,7 +16,6 @@
     "settings:read",
     "settings:write",
     "ui:toast",
-    "invoke:shell_run_command",
     "invoke:shell_bg_spawn_direct",
     "invoke:shell_bg_logs",
     "invoke:shell_bg_kill",
@@ -85,7 +84,7 @@
         "id": "webServer",
         "type": "select",
         "label": "Web server",
-        "description": "Which server serves the virtual hosts.",
+        "description": "Which server the project URLs point at. Both can be installed and both can run: the one chosen here keeps the ports below, and the other takes a fixed offset, so 80 and 443 become 8080 and 8443.",
         "default": "nginx",
         "options": [
           {

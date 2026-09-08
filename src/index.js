@@ -17,7 +17,10 @@ import { scanInstalled } from "./manager/versions.js";
 import { sweepDownloads } from "./manager/install.js";
 import { refreshStatuses, startAll, stopAll } from "./manager/services.js";
 import { loadProjects, refreshAllRuntimes } from "./project/projects.js";
-import { writeShims } from "./project/shims.js";
+import { writeShims, shimDir } from "./project/shims.js";
+import { migrateLayout, legacyShimDir } from "./manager/migrate.js";
+import { loadJobs } from "./manager/cron.js";
+import { relocateTerminalPath } from "./ui/setup.js";
 import { writeGlobalEnv } from "./manager/apply.js";
 import { seedDefaults } from "./manager/defaults.js";
 import { mountDashboard } from "./ui/dashboard.js";
@@ -40,6 +43,9 @@ export async function activate(context) {
 
   await loadConfig();
   await loadProjects();
+  // Read, not started. The scheduler is a service the user turns on; loading
+  // the list here is what lets the dashboard show what it WOULD run.
+  await loadJobs();
 
   // REGISTERED BEFORE ANY FILESYSTEM WORK, and the filesystem work is not
   // allowed to throw past this point.
@@ -57,8 +63,22 @@ export async function activate(context) {
   // they are generated code, and an extension update that changes how they
   // resolve must reach a machine that already has the old ones.
   try {
+    // BEFORE the directories are created, or `ensureDirs` would make an empty
+    // `internal/shims` and the migration would then decline to move the real
+    // one onto it.
+    const migration = await migrateLayout();
+
     // Was inside `loadConfig`; it belongs here, after the panel exists.
     await ensureDirs(layoutDirs());
+
+    // The shim directory's path is registered on TEDI's terminal PATH, so
+    // moving it leaves that entry pointing at nothing - and the failure is
+    // silent and total: every `php` in every terminal goes back to whatever the
+    // system finds first, with no error anywhere to say why.
+    if (migration.shims) {
+      await relocateTerminalPath(legacyShimDir(), shimDir());
+    }
+
     await writeShims();
     await scanInstalled();
     // Anything installed but never chosen gets a default now, so the dropdowns
@@ -119,14 +139,24 @@ export async function activate(context) {
 }
 
 export async function deactivate() {
-  // Latch first: every loop and every late async callback checks this, and one
-  // that fires after teardown would act on a `ctx` that is gone.
-  state.active = false;
+  // The timer goes first, so nothing new is scheduled while this runs.
   clearTimer();
 
   // Stop what we started. A PHP worker or a MySQL left running after the
   // extension is disabled is a process the user has no UI to stop.
+  //
+  // BEFORE the latch, not after. `proc.run()` treats a cleared `state.active`
+  // as "abort now and kill the process", which is right for a download that
+  // must not outlive the extension and exactly wrong here: `stopAll` asks nginx
+  // and Apache to stop through their own control flag, and that command was
+  // being killed before it could signal the master. What survived was the pool
+  // of workers still holding port 80 - the failure `services.stop()` performs
+  // the graceful stop to prevent in the first place.
   await stopAll().catch((err) => warn("could not stop every service", err));
+
+  // Latch last: every loop and every late async callback checks this, and one
+  // that fires after teardown would act on a `ctx` that is gone.
+  state.active = false;
 
   // The terminal PATH is deliberately NOT unregistered here.
   //

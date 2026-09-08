@@ -29,6 +29,8 @@ export function setCtx(value) {
  * @property {boolean} autoHttps
  * @property {boolean} manageHosts
  * @property {Record<string, string>} defaults  Global active version per runtime id.
+ * @property {boolean} skipTerminalPath  The user chose to leave the terminal
+ *   PATH alone. Their decision, remembered, not a step still outstanding.
  */
 
 /** @type {DevenvConfig} */
@@ -41,6 +43,7 @@ export const config = {
   autoHttps: true,
   manageHosts: true,
   defaults: {},
+  skipTerminalPath: false,
 };
 
 /** @param {Partial<DevenvConfig>} patch */
@@ -65,6 +68,18 @@ export function setConfig(patch) {
  * @property {number | null} port
  * @property {string | null} error
  * @property {string | null} version
+ */
+
+/**
+ * What one component is doing while it installs.
+ *
+ * @typedef {object} BusyState
+ * @property {string} text   What is happening, e.g. "Downloading node-v24.zip".
+ * @property {number} [pct]  0-100 while a transfer is running; absent for a
+ *   step that has no measurable length, which is what tells the UI to leave the
+ *   bar indeterminate rather than draw a confident 0%.
+ * @property {number} [step]   Which component of a batch this is, 1-based.
+ * @property {number} [total]  How many the batch has.
  */
 
 /**
@@ -97,9 +112,18 @@ export const state = {
   /** Registered projects. @type {Project[]} */
   projects: [],
 
-  /** In-flight installs, component id -> progress text, so the dashboard can
-   *  show what is happening without every view polling the network itself.
-   *  @type {Map<string, string>} */
+  /**
+   * In-flight installs, component id -> what it is doing, so the dashboard can
+   * show progress without every view polling the network itself.
+   *
+   * Structured rather than a pre-formatted string. It used to be
+   * `"Downloading php-8.4.12-nts-Win32-vs17-x64.zip 45%"`, which a progress BAR
+   * can only use by parsing its own label back apart - and a percentage read
+   * out of a filename is a bug waiting for the first archive whose name
+   * contains a `%`.
+   *
+   * @type {Map<string, BusyState>}
+   */
   busy: new Map(),
 
   /** Mounted dashboard views. Each is a re-render callback; a mounted view is
@@ -122,6 +146,15 @@ export const state = {
 
   /** Last error worth surfacing on the dashboard. @type {string | null} */
   error: null,
+
+  /** Bumped every time a scheduled job finishes.
+   *
+   *  The poll repaints only when `statusSignature` changes, and a cron run
+   *  changes nothing else it looks at - so a job that ran two minutes ago would
+   *  keep showing its previous result until the user touched something. A
+   *  counter is enough: the signature only has to DIFFER, it does not have to
+   *  describe what happened. */
+  cronRuns: 0,
 };
 
 /**
@@ -147,8 +180,10 @@ export function statusSignature() {
   const installed = [...state.installed.entries()]
     .map(([id, rows]) => `${id}:${rows.length}`)
     .join("|");
-  const busy = [...state.busy.entries()].map(([id, msg]) => `${id}:${msg}`).join("|");
-  return `${services}#${installed}#${busy}#${state.projects.length}`;
+  const busy = [...state.busy.entries()]
+    .map(([id, b]) => `${id}:${b.text}:${b.pct ?? ""}`)
+    .join("|");
+  return `${services}#${installed}#${busy}#${state.projects.length}#${state.cronRuns}`;
 }
 
 /** Re-render every mounted view. Safe to call when none are mounted. */
@@ -160,6 +195,29 @@ export function repaint() {
       console.error("[devenv] view repaint threw", err);
     }
   }
+}
+
+/**
+ * Wrap `fn` so it runs at most once every `ms`.
+ *
+ * For repaint during a download. `curl` reports a new percentage up to a
+ * hundred times per transfer, and each one used to rebuild the whole panel -
+ * visible as a flicker, and every rebuild re-ran the setup probes behind it. The
+ * caller still repaints unconditionally when the work FINISHES, so the last
+ * frame is never the one that got dropped.
+ *
+ * @param {() => void} fn
+ * @param {number} [ms]
+ * @returns {() => void}
+ */
+export function throttle(fn, ms = 150) {
+  let last = 0;
+  return () => {
+    const now = Date.now();
+    if (now - last < ms) return;
+    last = now;
+    fn();
+  };
 }
 
 export function clearTimer() {

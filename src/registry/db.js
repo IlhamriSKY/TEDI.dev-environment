@@ -81,6 +81,7 @@ export const postgres = {
   download: pgDownload,
   layout: pgLayout,
   systemBin: ["postgres", "pg_ctl"],
+  versionArgs: ["-V"],
   packageHint: "apt install postgresql  |  dnf install postgresql-server",
 };
 
@@ -166,5 +167,6 @@ export const mysql = {
   download: mysqlDownload,
   layout: mysqlLayout,
   systemBin: ["mysqld"],
+  versionArgs: ["-V"],
   packageHint: isWindows() ? "" : "brew install mysql  |  apt install mysql-server",
 };

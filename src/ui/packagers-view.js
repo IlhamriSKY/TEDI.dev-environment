@@ -11,7 +11,7 @@
 // appears on your PATH. npm arrives inside Node, pnpm and Yarn are switched on
 // through Corepack, and Bun is whatever you installed yourself.
 
-import { h, row, muted, pill, button, dot, mark, modal, dropdown } from "./el.js";
+import { h, row, muted, pill, button, status, mark, modal, dropdown } from "./el.js";
 import { markFor } from "./marks.js";
 import { survey, enablePackager } from "../manager/packagers.js";
 import { installedOf } from "../manager/versions.js";
@@ -83,7 +83,7 @@ export function openPackagers(nodeVersion, refreshPane) {
 function packagerRow(p, nodeVersion, refresh) {
   return row([
     mark(markFor(p.id)),
-    dot(p.available ? "ok" : "idle"),
+    status(p.available ? "ok" : "idle"),
     h("span", { text: p.label, style: "font-size:12px;font-weight:600;min-width:58px" }),
     p.version ? pill(p.version) : null,
     muted(originLabel(p)),

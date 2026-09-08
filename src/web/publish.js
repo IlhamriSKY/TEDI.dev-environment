@@ -15,6 +15,8 @@
 import { generate } from "./vhost.js";
 import { applyHosts } from "./hosts.js";
 import { restart } from "../manager/services.js";
+import { installedOf } from "../manager/versions.js";
+import { WEB_SERVERS } from "./ports.js";
 import { state, config } from "../runtime.js";
 
 /**
@@ -33,7 +35,21 @@ import { state, config } from "../runtime.js";
  * @returns {Promise<PublishResult>}
  */
 export async function publish(opts = {}) {
-  const { domains } = await generate(state.projects);
+  // Every installed web server, not only the active one. Each has its own
+  // `conf/<server>/` tree and its own ports, so keeping both current costs a
+  // few kilobytes and means starting the other one never serves a config from
+  // three project changes ago. The active one is always included even when it
+  // has no managed install, because a detected system server is still the one
+  // that will be started.
+  const servers = WEB_SERVERS.filter(
+    (id) => id === config.webServer || installedOf(id).length > 0,
+  );
+
+  /** @type {string[]} */
+  let domains = [];
+  for (const server of servers) {
+    ({ domains } = await generate(state.projects, server));
+  }
 
   let hostsOk = true;
   /** @type {string | undefined} */

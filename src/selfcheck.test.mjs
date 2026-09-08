@@ -16,7 +16,11 @@ import { spawnSync } from "node:child_process";
 import { renderHosts, MARKERS } from "./web/hosts.js";
 import { SHIMS, windowsShim, posixShim } from "./project/shims.js";
 import { plan } from "./core/archive.js";
-import { setCtx } from "./runtime.js";
+import { setCtx, setConfig } from "./runtime.js";
+import { parseLoungeIndex } from "./registry/servers.js";
+import { matches, isValidSchedule, splitCommand } from "./manager/cron.js";
+import { loadModuleLines } from "./web/serverroot.js";
+import { serverPorts } from "./web/ports.js";
 import { setDirective, getDirective } from "./manager/phpini.js";
 import { compareVersions, majorMinor } from "./registry/util.js";
 import { versionSatisfies } from "./project/resolve.js";
@@ -192,7 +196,190 @@ test("a tarball needs no decompression flag on either tar", () => {
   }
 });
 
+console.log("\nweb servers");
+
+// Three checks, and each one is a bug that shipped. None of them failed loudly:
+// the first reported "no build on this platform", which is the honest answer on
+// macOS and Linux and so read as normal; the second aborted Apache at startup
+// with a message about a file the user never wrote; the third made the second
+// web server unstartable for a reason that was in neither server's log.
+
+test("the Apache Lounge index is read case-insensitively", () => {
+  // Copied from the live page. The capital W is the whole point: the pattern
+  // matched a lowercase `win64` and found ZERO builds, which is indistinguishable
+  // from "this platform has no Apache" and is why it was never installed.
+  const html = `
+    <a href="/download/VS18/binaries/httpd-2.4.68-260827-Win64-VS18.zip">Apache 2.4.68 Win64</a>
+    <a href="/download/VS18/binaries/httpd-2.4.68-260827-win32-vs18.zip">Apache 2.4.68 Win32</a>`;
+  const index = parseLoungeIndex(html);
+  assert.equal(index.size, 1, "did not find exactly one build");
+  const url = index.get("2.4.68");
+  assert.ok(url, "2.4.68 was not indexed");
+  assert.match(url, /Win64-VS18\.zip$/, "picked something other than the 64-bit archive");
+  assert.doesNotMatch(url, /win32/i, "the 32-bit build must never be selected");
+});
+
+test("LoadModule names only modules this build actually ships", () => {
+  setCtx(/** @type {any} */ ({ os: { platform: "windows", arch: "x86_64" } }));
+  // Exactly what the Windows archive contains: no MPM module and no unixd,
+  // because both are compiled in. Naming either aborts startup with
+  // "Cannot load modules/mod_mpm_event.so into server".
+  const windows = new Set([
+    "mod_authz_core.so",
+    "mod_dir.so",
+    "mod_mime.so",
+    "mod_proxy_fcgi.so",
+    "mod_ssl.so",
+  ]);
+  const lines = loadModuleLines(windows, "C:\\srv\\apache\\modules");
+  assert.equal(lines.length, 5, "wrote a line per available module and no more");
+  assert.ok(
+    !lines.some((l) => /mpm_|unixd/.test(l)),
+    "named a module the Windows build does not ship",
+  );
+  assert.ok(
+    lines.every((l) => /"[^"]*modules\/mod_\w+\.so"$/.test(l)),
+    "a LoadModule path must be absolute and forward-slashed",
+  );
+});
+
+test("only one MPM is loaded even when several are present", () => {
+  setCtx(/** @type {any} */ ({ os: { platform: "linux", arch: "x86_64" } }));
+  const linux = new Set(["mod_mpm_event.so", "mod_mpm_prefork.so", "mod_unixd.so", "mod_dir.so"]);
+  const lines = loadModuleLines(linux, "/usr/lib/apache2/modules");
+  assert.equal(lines.filter((l) => l.includes("mpm_")).length, 1, "two MPMs cannot coexist");
+  assert.ok(lines.some((l) => l.includes("unixd")));
+});
+
+test("nothing is written when the modules directory was not found", () => {
+  assert.deepEqual(loadModuleLines(new Set(["mod_dir.so"]), null), []);
+});
+
+test("two web servers never plan the same port", () => {
+  setCtx(/** @type {any} */ ({ os: { platform: "windows", arch: "x86_64" } }));
+  setConfig({ webServer: "nginx", httpPort: 80, httpsPort: 443 });
+  const active = serverPorts("nginx");
+  const other = serverPorts("apache");
+  assert.deepEqual(active, { http: 80, https: 443 }, "the default server must keep its own ports");
+  assert.notEqual(active.http, other.http);
+  assert.notEqual(active.https, other.https);
+  assert.deepEqual(other, { http: 8080, https: 8443 });
+
+  // And the offset still separates them once the configured pair has moved,
+  // which a fixed 8080/8443 alternate would not.
+  setConfig({ httpPort: 8080, httpsPort: 8443 });
+  assert.notEqual(serverPorts("nginx").http, serverPorts("apache").http);
+  setConfig({ httpPort: 80, httpsPort: 443 });
+});
+
 setCtx(null);
+
+console.log("\ncron expressions");
+
+// A scheduler's failure mode is silence. A job that never fires and a job that
+// fires sixty times an hour both look like "nothing is wrong" from the code, so
+// the matcher is pinned against real expressions rather than read.
+
+/** @param {string} iso */
+const at = (iso) => new Date(iso);
+
+test("every minute means every minute", () => {
+  assert.ok(matches("* * * * *", at("2026-09-08T11:07:00")));
+  assert.ok(matches("* * * * *", at("2026-01-01T00:00:00")));
+});
+
+test("a step fires on the step, and not between", () => {
+  assert.ok(matches("*/5 * * * *", at("2026-09-08T11:05:00")));
+  assert.ok(matches("*/5 * * * *", at("2026-09-08T11:00:00")));
+  assert.ok(!matches("*/5 * * * *", at("2026-09-08T11:07:00")));
+});
+
+test("an hour and minute pin to one minute a day", () => {
+  assert.ok(matches("30 3 * * *", at("2026-09-08T03:30:00")));
+  assert.ok(!matches("30 3 * * *", at("2026-09-08T04:30:00")));
+  assert.ok(!matches("30 3 * * *", at("2026-09-08T03:31:00")));
+});
+
+test("a list and a range both match", () => {
+  assert.ok(matches("0 9,17 * * *", at("2026-09-08T17:00:00")));
+  assert.ok(!matches("0 9,17 * * *", at("2026-09-08T18:00:00")));
+  assert.ok(matches("0 9-11 * * *", at("2026-09-08T10:00:00")));
+  assert.ok(!matches("0 9-11 * * *", at("2026-09-08T12:00:00")));
+});
+
+test("day-of-month and day-of-week are OR, not AND", () => {
+  // crontab(5): when both are restricted, EITHER matching is a match. Getting
+  // this backwards makes `0 0 1 * 1` fire roughly never instead of twice a week.
+  // 2026-09-01 is a Tuesday, so the 1st matches and Monday does not.
+  assert.ok(matches("0 0 1 * 1", at("2026-09-01T00:00:00")), "the 1st should match on its own");
+  // 2026-09-07 is a Monday and not the 1st.
+  assert.ok(matches("0 0 1 * 1", at("2026-09-07T00:00:00")), "Monday should match on its own");
+  // 2026-09-08 is a Tuesday and not the 1st: neither half matches.
+  assert.ok(!matches("0 0 1 * 1", at("2026-09-08T00:00:00")));
+});
+
+test("a restricted weekday still narrows when the day-of-month is *", () => {
+  assert.ok(matches("0 0 * * 1", at("2026-09-07T00:00:00")));
+  assert.ok(!matches("0 0 * * 1", at("2026-09-08T00:00:00")));
+});
+
+test("Sunday is both 0 and 7", () => {
+  // 2026-09-06 is a Sunday.
+  assert.ok(matches("0 0 * * 0", at("2026-09-06T00:00:00")));
+  assert.ok(matches("0 0 * * 7", at("2026-09-06T00:00:00")));
+});
+
+test("the @ aliases mean what cron says they mean", () => {
+  assert.ok(matches("@hourly", at("2026-09-08T11:00:00")));
+  assert.ok(!matches("@hourly", at("2026-09-08T11:01:00")));
+  assert.ok(matches("@daily", at("2026-09-08T00:00:00")));
+  assert.ok(!matches("@daily", at("2026-09-08T01:00:00")));
+});
+
+test("a typo never becomes a wildcard", () => {
+  // The dangerous failure: a field that does not parse must not read as `*` and
+  // turn a nightly job into a every-minute one.
+  assert.ok(!matches("0 0 * * frobnicate", at("2026-09-08T00:00:00")));
+  assert.ok(!matches("not a schedule", at("2026-09-08T00:00:00")));
+  assert.ok(!matches("* * * *", at("2026-09-08T00:00:00")), "four fields is not a schedule");
+});
+
+test("the editor rejects what would never fire", () => {
+  assert.ok(isValidSchedule("* * * * *"));
+  assert.ok(isValidSchedule("*/15 2-4 1,15 * 1-5"));
+  assert.ok(isValidSchedule("@weekly"));
+  assert.ok(!isValidSchedule("* * * *"));
+  assert.ok(!isValidSchedule("99 * * * *"), "a minute out of range can never match");
+  assert.ok(!isValidSchedule(""));
+});
+
+console.log("\ncron command parsing");
+
+test("a quoted path stays one argument", () => {
+  assert.deepEqual(splitCommand('php "D:\\Dev Env\\www\\my site\\artisan" schedule:run'), [
+    "php",
+    "D:\\Dev Env\\www\\my site\\artisan",
+    "schedule:run",
+  ]);
+});
+
+test("ordinary words split on whitespace", () => {
+  assert.deepEqual(splitCommand("  npm   run   backup "), ["npm", "run", "backup"]);
+});
+
+test("an explicitly empty argument survives", () => {
+  assert.deepEqual(splitCommand('php artisan tinker --execute ""'), [
+    "php",
+    "artisan",
+    "tinker",
+    "--execute",
+    "",
+  ]);
+});
+
+test("nothing in, nothing out", () => {
+  assert.deepEqual(splitCommand("   "), []);
+});
 
 console.log("\nrescan-after-change (source, because only the live app shows it)");
 

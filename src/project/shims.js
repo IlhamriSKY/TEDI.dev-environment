@@ -74,10 +74,16 @@ export async function writeShims() {
     if (isWindows()) {
       await writeText(join(dir, `${shim.name}.cmd`), windowsShim(shim));
     } else {
-      const file = join(dir, shim.name);
-      await writeText(file, posixShim(shim));
-      await run("chmod", ["0755", file], { timeoutMs: 10_000 }).catch(() => {});
+      await writeText(join(dir, shim.name), posixShim(shim));
     }
+  }
+
+  // ONE chmod over the directory, not one per shim. This runs on every
+  // activation, and nine sequential subprocesses - each a spawn plus a poll
+  // loop across the IPC boundary - is a real share of the launch cost on macOS
+  // and Linux for something a single recursive call does.
+  if (!isWindows()) {
+    await run("chmod", ["-R", "0755", dir], { timeoutMs: 15_000 }).catch(() => {});
   }
 }
 

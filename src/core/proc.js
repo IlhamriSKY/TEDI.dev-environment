@@ -4,11 +4,19 @@
 // rather than `shell_run_command`, and that is not a style choice. The latter
 // takes a single COMMAND STRING and runs it through the user's login shell, so
 // every argument has to be quoted correctly for cmd.exe or for sh, and the
-// first path containing a space (`D:\Ilham\Project\laragon\www\TEDI - terax-ai`,
-// for instance) silently splits into two arguments. `spawn_direct` takes argv,
-// so there is no quoting layer to get wrong. `sh()` exists for the handful of
-// cases that genuinely need shell features, and is spelled differently so a
-// reader can see which one they are looking at.
+// first path containing a space (`D:\Dev Env\runtimes\php\8.4.12`, for
+// instance) silently splits into two arguments. `spawn_direct` takes argv,
+// so there is no quoting layer to get wrong.
+//
+// There is deliberately NO shell escape hatch here. One existed - an `sh()` over
+// `shell_run_command` - "for the handful of cases that genuinely need shell
+// features", and in the whole extension no such case ever arrived: the
+// downloads, the extractions, the version probes, the elevation helpers and the
+// scheduled jobs all pass argv. What it did cost was a declared
+// `invoke:shell_run_command`, which grants running an arbitrary command through
+// the user's login shell and is one of the host's HIGH-risk permissions. An
+// unused capability is still a granted one, so both are gone. If a case ever
+// does arrive, add it back with the caller that needs it.
 
 import { ctx, state } from "../runtime.js";
 
@@ -136,22 +144,6 @@ export async function isAlive(handle) {
   } catch {
     return false;
   }
-}
-
-/**
- * Run a real shell command string. Only for cases that need shell features
- * (pipes, redirection, builtins). Prefer `run()`.
- *
- * @param {string} command
- * @param {{ cwd?: string, timeoutSecs?: number }} [opts]
- */
-export async function sh(command, opts = {}) {
-  if (!ctx) throw new Error("extension is not active");
-  return await ctx.invoke("shell_run_command", {
-    command,
-    ...(opts.cwd ? { cwd: opts.cwd } : {}),
-    ...(opts.timeoutSecs ? { timeoutSecs: opts.timeoutSecs } : {}),
-  });
 }
 
 /**

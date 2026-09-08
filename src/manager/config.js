@@ -29,7 +29,14 @@ const SETTING_KEYS = /** @type {const} */ ([
 
 /**
  * The shape persisted in `<root>/config.json`.
- * @typedef {{ defaults?: Record<string, string> }} StoredConfig
+ *
+ * `skipTerminalPath` lives here rather than in the settings card because it is
+ * not a preference to browse and change, it is a decision already made: the
+ * user was asked once whether to put this environment first on the terminal
+ * PATH and said no. The card would present it as a switch someone might flip
+ * without the context of the question.
+ *
+ * @typedef {{ defaults?: Record<string, string>, skipTerminalPath?: boolean }} StoredConfig
  */
 
 /**
@@ -85,15 +92,32 @@ export async function loadConfig() {
 
   /** @type {StoredConfig} */
   const stored = await readJson(paths.configFile(), {});
-  setConfig({ defaults: stored.defaults ?? {} });
+  setConfig({
+    defaults: stored.defaults ?? {},
+    skipTerminalPath: stored.skipTerminalPath === true,
+  });
 }
 
 /** Persist the parts of config the extension owns.
  *  @returns {Promise<void>} */
 async function saveConfig() {
   /** @type {StoredConfig} */
-  const stored = { defaults: config.defaults };
+  const stored = { defaults: config.defaults, skipTerminalPath: config.skipTerminalPath };
   await writeJson(paths.configFile(), stored);
+}
+
+/**
+ * Remember that the user chose to leave the terminal PATH alone.
+ *
+ * Recorded rather than merely tolerated, because the alternative is a setup
+ * checklist that asks the same question on every launch. Registering later is
+ * still one button on the same row, so this closes nothing off.
+ *
+ * @param {boolean} skip @returns {Promise<void>}
+ */
+export async function setSkipTerminalPath(skip) {
+  setConfig({ skipTerminalPath: skip });
+  await saveConfig();
 }
 
 /**

@@ -6,7 +6,7 @@
 // their project is not on the version they set globally, which is otherwise the
 // most confusing thing a version manager does.
 
-import { h, row, pill, muted, button, dropdown, section, dot, icon } from "./el.js";
+import { h, row, pill, muted, button, dropdown, section, status, icon } from "./el.js";
 import {
   domainOf,
   addProject,
@@ -14,7 +14,7 @@ import {
   removeProject,
   discoverProjects,
 } from "../project/projects.js";
-import { readRequests, resolveProject } from "../project/resolve.js";
+import { resolveProject } from "../project/resolve.js";
 import { installedOf } from "../manager/versions.js";
 import { paths } from "../core/paths.js";
 import { openFolder } from "../core/proc.js";
@@ -86,8 +86,12 @@ export async function projectsView(refresh) {
  */
 async function projectRow(project, refresh) {
   const domain = domainOf(project);
+  // ONE resolve, not two. `resolveProject` already calls `readRequests` and
+  // returns the very `sources` object it produced, so asking for it again
+  // re-read `.nvmrc`, `.node-version` and `composer.json` for every project on
+  // every repaint - three file reads per project, for an answer already in
+  // hand.
   const resolved = await resolveProject(project);
-  const requests = await readRequests(project);
   const enabled = project.enabled !== false;
   const scheme = (project.https ?? config.autoHttps) ? "https" : "http";
   const port = scheme === "https" ? config.httpsPort : config.httpPort;
@@ -100,7 +104,7 @@ async function projectRow(project, refresh) {
       icon("lucide:Folder", enabled ? "var(--primary)" : "var(--muted-foreground)"),
       h("div", { style: "display:flex;flex-direction:column;gap:0;min-width:0" }, [
         h("span", { style: "display:flex;align-items:center;gap:5px" }, [
-          dot(enabled ? "ok" : "idle"),
+          status(enabled ? "ok" : "idle"),
           h("span", {
             text: project.name,
             style: "font-size:12px;font-weight:600;line-height:1.35",
@@ -120,8 +124,8 @@ async function projectRow(project, refresh) {
     "div",
     { style: "display:flex;align-items:center;gap:5px;flex:1;min-width:0;flex-wrap:wrap" },
     [
-      versionPicker("php", project, resolved.php, requests.sources.php, refresh),
-      versionPicker("node", project, resolved.node, requests.sources.node, refresh),
+      versionPicker("php", project, resolved.php, resolved.sources.php, refresh),
+      versionPicker("node", project, resolved.node, resolved.sources.node, refresh),
       resolved.sources.phpFallback ? muted(resolved.sources.phpFallback) : null,
       resolved.sources.nodeFallback ? muted(resolved.sources.nodeFallback) : null,
     ],
@@ -258,8 +262,8 @@ async function addByPath(refresh) {
 /**
  * Register every project-looking folder under a parent directory.
  *
- * Defaults to the environment's own `www`, which is the Laragon habit: put a
- * folder there and it becomes a site. Any other folder still works.
+ * Defaults to the environment's own `www`: put a folder there and it becomes a
+ * site. Any other folder still works.
  *
  * @param {() => void} refresh @returns {Promise<void>}
  */

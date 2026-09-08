@@ -40,7 +40,7 @@ export const COMMON_SETTINGS = /** @type {const} */ ([
 export async function iniPathFor(version) {
   const row = resolveVersion("php", version);
   if (!row) return null;
-  const path = paths.phpIni(version, row.binDir);
+  const path = paths.phpIni(row.binDir);
   return { path, exists: await exists(path) };
 }
 

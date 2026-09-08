@@ -14,7 +14,7 @@
 import { paths } from "../core/paths.js";
 import { subdirs, exists } from "../core/fsx.js";
 import { which, probe } from "../core/proc.js";
-import { providers, provider } from "../registry/index.js";
+import { providers } from "../registry/index.js";
 import { compareVersions } from "../registry/util.js";
 import { installRoot } from "./install.js";
 import { state } from "../runtime.js";
@@ -33,52 +33,75 @@ import { state } from "../runtime.js";
  * @returns {Promise<Map<string, InstalledVersion[]>>}
  */
 export async function scanInstalled() {
+  // The nine providers are scanned CONCURRENTLY, and it is worth the one line
+  // of `Promise.all`: this runs inside `activate()`, so its cost is charged to
+  // every launch of TEDI whether or not anyone opens the pane, and `bootAll`
+  // waits for the slowest extension. Sequentially it was around a dozen IPC
+  // round trips and a `where`/`command -v` SUBPROCESS per provider, one after
+  // another; in parallel the whole scan is as slow as its slowest single probe.
+  //
+  // Nothing here shares state between providers, so there is no ordering to
+  // preserve inside the scan - and the map is rebuilt from the ordered provider
+  // list afterwards, so the dashboard's row order is unchanged.
+  const scans = await Promise.all(providers().map((p) => scanProvider(p)));
+
   /** @type {Map<string, InstalledVersion[]>} */
   const found = new Map();
+  providers().forEach((p, i) => found.set(p.id, scans[i]));
 
-  for (const p of providers()) {
-    /** @type {InstalledVersion[]} */
-    const rows = [];
+  state.installed = found;
+  return found;
+}
 
-    if (p.kind === "tool" && !p.multiVersion) {
-      // Non-versioned tool: one executable in tools/, present or not.
-      const layout = await p.layout("");
-      if (await exists(layout.exe)) {
-        const line = await probe(layout.exe, ["--version"]);
-        rows.push({
-          component: p.id,
-          version: extractVersion(line) ?? "installed",
-          dir: paths.tools(),
-          binDir: layout.binDir,
-          origin: "download",
-        });
-      }
-    } else {
-      const base = baseDirFor(p);
-      for (const version of await subdirs(base)) {
-        // Skip the staging leftovers an interrupted install can leave behind.
-        if (version.includes(".staging-") || version.includes("-lift-")) continue;
+/**
+ * Every version of one component: what we installed, then what the machine had.
+ *
+ * @param {Provider} p
+ * @returns {Promise<InstalledVersion[]>}
+ */
+async function scanProvider(p) {
+  /** @type {InstalledVersion[]} */
+  const rows = [];
+
+  if (p.kind === "tool" && !p.multiVersion) {
+    // Non-versioned tool: one executable in tools/, present or not.
+    const layout = await p.layout("");
+    if (await exists(layout.exe)) {
+      const line = await probe(layout.exe, p.versionArgs ?? ["--version"]);
+      rows.push({
+        component: p.id,
+        version: extractVersion(line) ?? "installed",
+        dir: paths.tools(),
+        binDir: layout.binDir,
+        origin: "download",
+      });
+    }
+  } else {
+    const base = baseDirFor(p);
+    // Skip the staging leftovers an interrupted install can leave behind.
+    const versions = (await subdirs(base)).filter(
+      (v) => !v.includes(".staging-") && !v.includes("-lift-"),
+    );
+    const checked = await Promise.all(
+      versions.map(async (version) => {
         const layout = await p.layout(version);
-        if (!(await exists(layout.exe))) continue;
-        rows.push({
+        if (!(await exists(layout.exe))) return null;
+        return /** @type {InstalledVersion} */ ({
           component: p.id,
           version,
           dir: installRoot(p, version),
           binDir: layout.binDir,
           origin: "download",
         });
-      }
-      rows.sort((a, b) => compareVersions(a.version, b.version));
-    }
-
-    const sys = await detectSystem(p);
-    if (sys) rows.push(sys);
-
-    found.set(p.id, rows);
+      }),
+    );
+    for (const row of checked) if (row) rows.push(row);
+    rows.sort((a, b) => compareVersions(a.version, b.version));
   }
 
-  state.installed = found;
-  return found;
+  const sys = await detectSystem(p);
+  if (sys) rows.push(sys);
+  return rows;
 }
 
 /** The directory holding this provider's versioned installs.
@@ -102,7 +125,11 @@ async function detectSystem(p) {
   for (const name of p.systemBin ?? []) {
     const hit = await which(name);
     if (!hit) continue;
-    const line = await probe(hit, ["--version"]);
+    // The provider's own flag, not `--version`. `nginx --version` and
+    // `httpd --version` are usage errors, so a detected system web server
+    // reported itself as bare "system" with no number - on macOS and Linux,
+    // where a system install is the ONLY way to have one.
+    const line = await probe(hit, p.versionArgs ?? ["--version"]);
     const version = extractVersion(line);
     return {
       component: p.id,

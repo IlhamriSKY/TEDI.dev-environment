@@ -81,26 +81,38 @@ export function samePath(a, b) {
   return normalize(a) === normalize(b);
 }
 
-/** Split a path into its segments, dropping empties.
- *  @param {string} p @returns {string[]} */
-function segments(p) {
-  return String(p ?? "")
-    .split(/[\\/]/)
-    .filter(Boolean);
-}
-
 // ---------------------------------------------------------------------------
 // Layout. One function per directory so no caller ever spells a path itself.
 // ---------------------------------------------------------------------------
 
+/**
+ * Everything generated, cached or plumbing, under one folder.
+ *
+ * The root is the first thing a user opens and it had fifteen entries in it,
+ * nine of which nobody has a reason to look inside: the metadata cache, the
+ * download staging area, the pidfiles, nginx's scratch space, the shims, the
+ * single-file tools, the certificates and the generated server config. Grouping
+ * them leaves a root where every entry answers a question someone actually
+ * asks - where are my projects, where are my databases, what did the server log,
+ * which runtimes are installed.
+ *
+ * Named rather than hidden. A dot-folder would be tidier still and would also
+ * be the thing a user cannot find when they do need it, and they will: the shim
+ * directory's path is what goes on the terminal PATH, and generated vhosts are
+ * exactly what you read when a site misbehaves.
+ */
+function internal() {
+  return join(root(), "internal");
+}
+
 /** Provider metadata cache, TTL'd. Safe to delete at any time. */
 function cache() {
-  return join(root(), "cache");
+  return join(internal(), "cache");
 }
 
 /** Archives mid-download. Cleared on success and on next start. */
 function downloads() {
-  return join(root(), "downloads");
+  return join(internal(), "downloads");
 }
 
 /** Installed runtime tree: `runtimes/<component>/<version>/`.
@@ -145,16 +157,17 @@ function data(component, version) {
 
 /** Single-file tools: composer.phar, mkcert. */
 function tools() {
-  return join(root(), "tools");
+  return join(internal(), "tools");
 }
 
 /**
  * Where projects live by default.
  *
- * Laragon's whole shape is one folder you can point at, back up or move, with
- * the binaries, the sites and the databases all inside it. Keeping `www/` under
- * the same root as `runtimes/` and `data/` is what makes that true here: the
- * root is the environment, and there is exactly one path to remember.
+ * The whole shape of this environment is one folder you can point at, back up
+ * or move, with the binaries, the sites and the databases all inside it.
+ * Keeping `www/` under the same root as `runtimes/` and `data/` is what makes
+ * that true: the root IS the environment, and there is exactly one path to
+ * remember.
  *
  * A project OUTSIDE this folder still works - `addProject` takes any absolute
  * path - so an existing checkout somewhere else is never forced to move.
@@ -165,43 +178,46 @@ function www() {
 
 /** Generated shims, the one directory that goes on the terminal PATH. */
 function shims() {
-  return join(root(), "shims");
+  return join(internal(), "shims");
 }
 
 /** Local CA and issued leaf certificates. */
 function certs() {
-  return join(root(), "certs");
+  return join(internal(), "certs");
 }
 
 /** Generated server and PHP configuration.
  *  @param {...string} rest @returns {string} */
 function conf(...rest) {
-  return join(root(), "conf", ...rest);
+  return join(internal(), "conf", ...rest);
 }
 
 /**
  * Per-version php.ini.
  *
  * It lives in the runtime's own BIN directory, not under `conf/`, because that
- * is the only place PHP finds it without help: `php.exe` on Windows reads the
- * ini sitting beside it, and everywhere else the path is passed with `-c`,
- * which the shims and the FastCGI pool both build from the bin directory they
- * already resolved. Keeping it under `conf/` would mean every invocation of
- * `php` needed to know a second path.
+ * is the only place PHP finds it without being told: `php.exe` on Windows reads
+ * the ini sitting beside it. Keeping it under `conf/` would mean every
+ * invocation of `php` needed to know a second path.
+ *
+ * KNOWN LIMIT off Windows: a static-php-cli build has its ini path compiled in
+ * and neither the shim nor the FPM pool passes `-c`, so a file written here is
+ * read on Windows and ignored there. The fix is a `-c` on both, and it is not
+ * done yet.
  *
  * Two versions therefore never share a file, which is the point: `memory_limit`
  * and the enabled extension list belong to one runtime, not to the machine.
  *
- * @param {string} version @param {string} binDir @returns {string}
+ * @param {string} binDir @returns {string}
  */
-function phpIni(version, binDir) {
+function phpIni(binDir) {
   return join(binDir, "php.ini");
 }
 
 /** Generated vhost fragments, one file per project per server.
  *  @param {string} srv @returns {string} */
 function vhosts(srv) {
-  return join(root(), "conf", srv, "vhosts");
+  return join(internal(), "conf", srv, "vhosts");
 }
 
 function logs() {
@@ -209,7 +225,7 @@ function logs() {
 }
 
 function runDir() {
-  return join(root(), "run");
+  return join(internal(), "run");
 }
 
 function configFile() {
@@ -220,13 +236,24 @@ function projectsFile() {
   return join(root(), "projects.json");
 }
 
-/** Shim fallback when a project declares nothing. */
+/** The scheduled jobs. At the root beside `projects.json` rather than inside
+ *  `internal/`, because it is the user's own list and they may well want to read
+ *  or hand-edit it. */
+function cronFile() {
+  return join(root(), "cron.json");
+}
+
+/** Shim fallback when a project declares nothing.
+ *
+ *  Beside the shim directory, not above it: both shims read it as
+ *  `<self>/../global.env`, so it has to be the shim directory's parent. */
 function globalEnv() {
-  return join(root(), "global.env");
+  return join(internal(), "global.env");
 }
 
 export const paths = {
   root,
+  internal,
   cache,
   downloads,
   runtime,
@@ -245,29 +272,50 @@ export const paths = {
   vhosts,
   logs,
   run: runDir,
+  temp,
   configFile,
   projectsFile,
+  cronFile,
   globalEnv,
 };
 
-/** Every directory that must exist before anything else runs.
- *  @returns {string[]} */
+/** nginx's scratch space. It resolves `client_body_temp` and friends against
+ *  its `-p` prefix and creates them itself, but with a non-recursive
+ *  CreateDirectory - so the parent has to exist first or the server refuses to
+ *  start with `[emerg] CreateDirectory() ".../temp/client_body_temp" failed
+ *  (3)`. The syntax check passes; only starting fails, which is why this needed
+ *  a real `nginx -t` to find.
+ *  @returns {string} */
+function temp() {
+  return join(internal(), "temp");
+}
+
+/**
+ * Every directory that must exist before anything else runs.
+ *
+ * The four the USER opens come first, then the machinery, which is also the
+ * order they read in the comment above `internal()`.
+ *
+ * @returns {string[]}
+ */
 export function layoutDirs() {
   return [
     root(),
-    paths.cache(),
-    paths.downloads(),
+    paths.www(),
     join(root(), "runtimes"),
     join(root(), "servers"),
     join(root(), "services"),
     join(root(), "data"),
+    paths.logs(),
+    paths.internal(),
+    paths.cache(),
+    paths.downloads(),
     paths.tools(),
-    paths.www(),
     paths.shims(),
     paths.certs(),
     paths.conf(),
-    paths.logs(),
     paths.run(),
+    paths.temp(),
   ];
 }
 

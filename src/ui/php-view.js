@@ -106,7 +106,7 @@ export function openPhpConfig(version, refreshPane) {
 
 /**
  * Editing a SYSTEM runtime writes into the install the user's own package
- * manager (or Laragon, or Homebrew) put there. That is usually exactly what
+ * manager, installer or stack put there. That is usually exactly what
  * they want, and it is also the one action here that reaches outside this
  * extension's own tree, so it is stated before the controls rather than
  * discovered afterwards.
