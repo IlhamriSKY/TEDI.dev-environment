@@ -56,6 +56,7 @@ import { openAccounts } from "./mysql-view.js";
 import { viewerReady, openViewer } from "../web/viewer.js";
 import {
   installedVersion as phpMyAdminVersion,
+  installedNow as phpMyAdminInstalledNow,
   install as installPhpMyAdmin,
   uninstall as removePhpMyAdmin,
   releases as phpMyAdminReleases,
@@ -453,10 +454,10 @@ function phpMyAdminRow(refresh) {
         settingRow(
           "phpMyAdmin",
           installed
-            ? `Version ${installed}, served at ${phpMyAdminUrl()}. It is not one of your projects and does not appear in that list.`
+            ? `${installed}, at ${phpMyAdminUrl()}`
             : mismatch
-              ? `${chosen} supports PHP ${release?.phpVersions}, and this environment is on ${php}. It will install, and may not run.`
-              : "A browser front end for MySQL, served on its own domain.",
+              ? `${chosen} wants PHP ${release?.phpVersions}; this environment is on ${php}.`
+              : "A browser front end for MySQL, on its own domain.",
           h("div", { style: "display:flex;align-items:center;gap:5px" }, [
             installed ? pill(installed, { icon: "lucide:CircleCheck" }) : null,
             available.length
@@ -493,13 +494,6 @@ function phpMyAdminRow(refresh) {
               },
               { icon: "lucide:Download", variant: installed ? "default" : "primary" },
             ),
-            installed
-              ? button("Open", () => void openFolder(phpMyAdminUrl()), {
-                  icon: "lucide:ExternalLink",
-                  variant: "primary",
-                  title: phpMyAdminUrl(),
-                })
-              : null,
             installed
               ? button(
                   "",
@@ -679,6 +673,15 @@ function serviceRow(id, refresh) {
           spin: busy?.quiet,
           title: busy?.quiet ? busy.text : "Install another " + (p?.label ?? id) + " version",
         }),
+    // Beside the viewer, because both answer the same question: show me this
+    // database. It sat in the settings dialog, which is where you go to CHANGE
+    // something rather than to use it.
+    id === "mysql" && phpMyAdminInstalledNow()
+      ? button("phpMyAdmin", () => void openFolder(phpMyAdminUrl()), {
+          icon: "lucide:ExternalLink",
+          title: phpMyAdminUrl(),
+        })
+      : null,
     // Only the databases SQL Explorer can open, and only when it is installed.
     // Absent is the honest look for a handover with nowhere to go.
     VIEWABLE.has(id) && viewerReady()

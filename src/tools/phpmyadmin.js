@@ -44,6 +44,10 @@ function stampFile() {
   return join(dir(), ".tedi-version");
 }
 
+/** Last answer from `installedVersion`, for the service row - which renders
+ *  synchronously and cannot await a file read on every paint. */
+let installed = /** @type {string | null} */ (null);
+
 /**
  * The version installed, or null.
  *
@@ -54,9 +58,17 @@ function stampFile() {
  * @returns {Promise<string | null>}
  */
 export async function installedVersion() {
-  if (!(await exists(join(dir(), "index.php")))) return null;
-  const stamp = (await readText(stampFile()))?.trim();
-  return stamp || "unknown";
+  installed = (await exists(join(dir(), "index.php")))
+    ? (await readText(stampFile()))?.trim() || "unknown"
+    : null;
+  return installed;
+}
+
+/** What the last `installedVersion` found. Null until something has asked, so
+ *  `activate` asks once.
+ *  @returns {string | null} */
+export function installedNow() {
+  return installed;
 }
 
 /**
@@ -195,6 +207,7 @@ export async function install(version) {
 
     await writeText(stampFile(), `${version}\n`);
     await writeConfig();
+    installed = version;
   } finally {
     setBusy(BUSY_ID, null);
   }
@@ -204,6 +217,7 @@ export async function install(version) {
  *  @returns {Promise<void>} */
 export async function uninstall() {
   await remove(dir());
+  installed = null;
 }
 
 /** The line the installer writes into `config.inc.php`. Proof that a folder is

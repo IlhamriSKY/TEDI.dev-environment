@@ -18,7 +18,11 @@ import { provider } from "./registry/index.js";
 import { probeViewer } from "./web/viewer.js";
 import { removeProject } from "./project/projects.js";
 import { publish } from "./web/publish.js";
-import { writeConfig as writePhpMyAdminConfig, migrateFromWww } from "./tools/phpmyadmin.js";
+import {
+  writeConfig as writePhpMyAdminConfig,
+  installedVersion as phpMyAdminVersion,
+  migrateFromWww,
+} from "./tools/phpmyadmin.js";
 import { sweepDownloads } from "./manager/install.js";
 import { refreshStatuses, startAll, stopAll, recoverRunning } from "./manager/services.js";
 import { loadProjects, refreshAllRuntimes } from "./project/projects.js";
@@ -108,6 +112,9 @@ export async function activate(context) {
     // The other stored copy of the database address, for a config left behind
     // by a release that did not rewrite it.
     await writePhpMyAdminConfig();
+    // Once each: what the rows need to know synchronously. A service row cannot
+    // await a file read or a directory probe on every paint.
+    await phpMyAdminVersion();
     // Once: which optional extensions are alongside us. A service row renders
     // synchronously and cannot await a directory probe.
     await probeViewer();

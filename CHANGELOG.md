@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.24
+
+- **The settings rows lay out properly.** Text is the only thing in a row that
+  can wrap, so under a flex default it was the only thing that gave: the
+  phpMyAdmin row squeezed its description down to one word per line while the
+  buttons beside it kept their full width. The label takes the space and the
+  controls take none.
+
+- **Open phpMyAdmin sits beside Open in SQL Explorer**, on the MySQL row, where
+  the other "show me this database" button already is. It was in the settings
+  dialog, which is where you go to change something rather than to use it - and
+  it was the fifth control on a row that had four too many.
+
 ## 0.1.23
 
 - **Creating a MySQL account failed with `Unknown command '\D'`.** The SQL is

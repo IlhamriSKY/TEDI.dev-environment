@@ -990,12 +990,16 @@ export function input(value, onCommit, placeholder = "") {
  */
 export function settingRow(title, note, control) {
   return row([
-    h("div", { style: "display:flex;flex-direction:column;gap:0;min-width:0" }, [
+    // `flex:1` on the LABEL and `flex:none` on the control, rather than a
+    // spacer between two auto-sized items. Text is the only thing here that can
+    // wrap, so under a flex default it is the only thing that gives - and a
+    // row with three controls squeezed its description down to one word per
+    // line while the buttons kept their full width.
+    h("div", { style: "display:flex;flex-direction:column;gap:0;flex:1;min-width:0" }, [
       h("span", { text: title, style: "font-size:12px;font-weight:600;line-height:1" }),
       muted(note),
     ]),
-    h("div", { style: "flex:1" }),
-    control,
+    h("div", { style: "display:flex;align-items:center;gap:5px;flex:none" }, [control]),
   ]);
 }
 
