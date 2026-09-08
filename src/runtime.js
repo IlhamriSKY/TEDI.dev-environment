@@ -29,6 +29,8 @@ export function setCtx(value) {
  * @property {boolean} autoHttps
  * @property {boolean} manageHosts
  * @property {Record<string, string>} defaults  Global active version per runtime id.
+ * @property {Record<string, number>} ports  Port a service was explicitly given,
+ *   per id. Absent means "the conventional default for that service".
  * @property {boolean} skipTerminalPath  The user chose to leave the terminal
  *   PATH alone. Their decision, remembered, not a step still outstanding.
  */
@@ -43,6 +45,7 @@ export const config = {
   autoHttps: true,
   manageHosts: true,
   defaults: {},
+  ports: {},
   skipTerminalPath: false,
 };
 

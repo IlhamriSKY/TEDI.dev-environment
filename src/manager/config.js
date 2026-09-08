@@ -36,7 +36,8 @@ const SETTING_KEYS = /** @type {const} */ ([
  * PATH and said no. The card would present it as a switch someone might flip
  * without the context of the question.
  *
- * @typedef {{ defaults?: Record<string, string>, skipTerminalPath?: boolean }} StoredConfig
+ * @typedef {{ defaults?: Record<string, string>, ports?: Record<string, number>,
+ *             skipTerminalPath?: boolean }} StoredConfig
  */
 
 /**
@@ -94,6 +95,7 @@ export async function loadConfig() {
   const stored = await readJson(paths.configFile(), {});
   setConfig({
     defaults: stored.defaults ?? {},
+    ports: stored.ports ?? {},
     skipTerminalPath: stored.skipTerminalPath === true,
   });
 }
@@ -102,8 +104,32 @@ export async function loadConfig() {
  *  @returns {Promise<void>} */
 async function saveConfig() {
   /** @type {StoredConfig} */
-  const stored = { defaults: config.defaults, skipTerminalPath: config.skipTerminalPath };
+  const stored = {
+    defaults: config.defaults,
+    ports: config.ports,
+    skipTerminalPath: config.skipTerminalPath,
+  };
   await writeJson(paths.configFile(), stored);
+}
+
+/**
+ * Pin a service to a port, or clear the pin.
+ *
+ * Stored here rather than in the settings card because it is per service and
+ * the card is a fixed list of fields. The web servers are the exception and
+ * deliberately so: their port is `httpPort`, a real setting, because it appears
+ * in every project URL - so the dashboard writes THAT rather than a second
+ * number that would then have to agree with it.
+ *
+ * @param {string} id @param {number | null} port
+ * @returns {Promise<void>}
+ */
+export async function setServicePort(id, port) {
+  const next = { ...config.ports };
+  if (port === null) delete next[id];
+  else next[id] = port;
+  setConfig({ ports: next });
+  await saveConfig();
 }
 
 /**

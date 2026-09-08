@@ -40,12 +40,20 @@ import { state, ctx, throttle } from "../runtime.js";
  * @returns {HTMLElement}
  */
 export function runtimesView(refresh) {
-  // Every runtime, and every managed TOOL. Composer and mkcert are tools rather
-  // than runtimes, but from here they behave identically: a version you install,
-  // switch and remove. Listing one and hiding the other made the "install
-  // recommended" count disagree with the rows on screen.
+  // The runtimes, and only the runtimes: PHP and Node.
+  //
+  // Composer and mkcert were listed here too, on the reasoning that a tool
+  // behaves identically from this row - a version you install, switch and
+  // remove. True, and not the point: nobody switches them. Composer is one phar
+  // run by whichever PHP the project resolved, and mkcert is a single binary
+  // that manages a machine-wide CA. Both are installed by "Install everything"
+  // and neither has a decision attached, so a row with a version dropdown and a
+  // Remove button was two controls for questions nobody asks, sitting above the
+  // two rows that matter.
+  //
+  // They are still managed, still installed, still counted by the button below.
   const rows = providers()
-    .filter((p) => p.kind === "runtime" || p.kind === "tool")
+    .filter((p) => p.kind === "runtime")
     .map((p) => runtimeRow(p, refresh));
 
   // Offered only while something is genuinely missing. A permanent "install

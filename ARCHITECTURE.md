@@ -88,12 +88,19 @@ Chosen by the owner over a single-binary server. Consequences accepted:
   `php-cgi` behind a small process pool we supervise. macOS and Linux use
   `php-fpm` when the build has it. The vhost generator emits whichever the
   active runtime actually supports, probed at activation, never assumed.
-- **Both are installed, and both can run.** The chosen one keeps the configured
-  ports, because those are the numbers in the user's URLs and in their
-  bookmarks; the other takes a fixed `+8000` offset, which is deterministic
-  because the number is written into the generated `listen` line and has to be
-  the same one next time. Each writes its own `conf/<server>/` tree, so starting
-  the other never means serving a configuration from three project changes ago.
+- **Both are installed, one runs.** Starting either stops the other, so both
+  take the configured ports and there is only ever one set of rules answering a
+  project URL. They briefly ran side by side on a `+8000` offset; that was a
+  worse answer to a question nobody asked, because the second server is the one
+  you did not configure and its offset then appears in a URL nobody typed. Each
+  still writes its own `conf/<server>/` tree, so switching costs a click rather
+  than a regeneration.
+- **A port is a choice, and a choice is not overridden.** The web servers take
+  `httpPort`, a real setting, because that number is in every project URL. Every
+  other service takes a per-service pin in `config.json`, and a pinned port is
+  never moved when it is taken - somebody typed 3307 because a connection string
+  says 3307. An UNPINNED database still moves out of the way, because nothing is
+  pointing at it yet and refusing to start would be an obstacle.
 - **Where each server keeps its OWN files is asked, not derived.** `nginx -V`
   states its conf path and `httpd -V` states `HTTPD_ROOT`; the answer is then
   confirmed by looking for a file that must be there, with a candidate list

@@ -7,7 +7,18 @@
 // by something else" is a sentence a person can act on and "failed to start"
 // is not.
 
-import { h, row, pill, muted, button, status, section, mark, progress } from "./el.js";
+import {
+  h,
+  row,
+  pill,
+  muted,
+  button,
+  status,
+  section,
+  mark,
+  progress,
+  input,
+} from "./el.js";
 import { markFor } from "./marks.js";
 import { provider } from "../registry/index.js";
 import { installedOf } from "../manager/versions.js";
@@ -18,10 +29,15 @@ import {
   start,
   stop,
   restart,
+  startAll,
+  stopAll,
   runningPhpPools,
 } from "../manager/services.js";
 import { listJobs, runningCount } from "../manager/cron.js";
-import { plannedPort, isWebServer } from "../web/ports.js";
+import { plannedPort, defaultPortFor, isWebServer } from "../web/ports.js";
+import { setServicePort, writeSetting } from "../manager/config.js";
+import { publish } from "../web/publish.js";
+import { openCron } from "./cron-view.js";
 import { state, config, ctx } from "../runtime.js";
 
 /**
@@ -42,9 +58,72 @@ export function servicesView(refresh) {
     .map((id) => serviceRow(id, refresh));
 
   const pools = runningPhpPools();
-  const aside = muted(pools.length ? `PHP FastCGI: ${pools.join(", ")}` : "No PHP worker running");
+  // The run controls live HERE now, not in the pane header. They act on this
+  // section and nothing else, and a header button that starts five processes
+  // two sections away is a button whose effect you have to remember rather than
+  // see.
+  const aside = h("div", { style: "display:flex;align-items:center;gap:6px" }, [
+    muted(pools.length ? `PHP FastCGI: ${pools.join(", ")}` : "No PHP worker running"),
+    button("Start all", async () => {
+      await startAll();
+      refresh();
+    }),
+    button("Stop all", async () => {
+      await stopAll();
+      refresh();
+    }),
+  ]);
 
   return section("Services", rows, aside);
+}
+
+/**
+ * The port, as a pill while it is bound and a field while it is not.
+ *
+ * A web server writes `httpPort`, the real setting, because that number is in
+ * every project URL and there has to be exactly one of it. Everything else
+ * writes a per-service pin in `config.json`, which also tells `choosePort`
+ * never to move it: a port somebody typed was typed because something is
+ * pointing at it.
+ *
+ * Blank clears the pin and goes back to the conventional default, which is a
+ * way back that costs no second control.
+ *
+ * @param {string} id
+ * @param {import("../runtime.js").ServiceStatus | undefined} st
+ * @param {boolean} live  Running or starting: the port is a fact, not a request.
+ * @param {() => void} refresh
+ * @returns {HTMLElement}
+ */
+function portControl(id, st, live, refresh) {
+  const planned = plannedPort(id);
+  if (live) return pill(`:${st?.port ?? planned}`, { title: "The port it is bound to" });
+
+  const field = input(
+    String(planned),
+    async (value) => {
+      const text = value.trim();
+      const next = text === "" ? null : Number(text);
+      if (next !== null && (!Number.isInteger(next) || next < 1 || next > 65535)) {
+        ctx?.ui.toast(`${text} is not a port. Use 1 to 65535, or leave it blank for the default.`, {
+          variant: "error",
+        });
+        refresh();
+        return;
+      }
+      if (isWebServer(id)) await writeSetting("httpPort", next ?? 80);
+      else await setServicePort(id, next);
+      // A generated vhost carries the web server's port in its `listen` lines,
+      // so a port change is a republish and not just a stored number.
+      await publish().catch(() => {});
+      refresh();
+    },
+    String(defaultPortFor(id)),
+  );
+  field.style.width = "72px";
+  field.style.textAlign = "center";
+  field.setAttribute("aria-label", `Port for ${id}`);
+  return field;
 }
 
 /** Display names for services that are not registry providers. */
@@ -116,16 +195,26 @@ function serviceRow(id, refresh) {
     { style: "display:flex;align-items:center;gap:6px;flex:1;min-width:0;flex-wrap:wrap" },
     [
       version ? pill(version) : null,
-      // A port, for the things that bind one. The scheduler does not, and a
-      // pill reading `:8000` beside it would be an invented fact.
-      inProcess ? null : pill(`:${st?.port ?? plannedPort(id)}`),
+      // A port, for the things that bind one - and while the service is
+      // stopped, the port is a FIELD rather than a label. Changing it is the
+      // common reason someone opens this pane: something on the machine already
+      // has 3306, or 80. A running service keeps a pill, because that number is
+      // a fact about a bound socket and not a request. The scheduler binds
+      // nothing, and a pill reading `:8000` beside it would be an invented fact.
+      inProcess ? null : portControl(id, st, running || starting, refresh),
       // What the scheduler is actually carrying, which is the only thing about
       // it worth a glance: how many jobs, and whether any is running now.
       inProcess ? pill(jobSummary()) : null,
-      // Which web server the projects' URLs point at. Only worth saying when
-      // there are two rows that could answer.
+      // Which web server the projects' URLs point at, and therefore which one
+      // "Start all" brings up. Only worth saying when the other is installed
+      // too, because only then is a choice being made.
       isWebServer(id) && installedOf(id === "nginx" ? "apache" : "nginx").length > 0
-        ? pill(id === config.webServer ? "default" : "alternate")
+        ? pill(id === config.webServer ? "default" : "alternate", {
+            title:
+              id === config.webServer
+                ? "Your project URLs point here. Change which one in Settings."
+                : "Starting this stops the default: only one web server runs at a time.",
+          })
         : null,
       failed && st?.error
         ? h("span", {
@@ -139,6 +228,15 @@ function serviceRow(id, refresh) {
   // Nothing to press while its own archive is still coming down.
   const disabled = !present || Boolean(busy);
   const right = h("div", { style: "display:flex;align-items:center;gap:5px;flex:none" }, [
+    // The scheduler's contents open FROM its row, like php.ini opens from the
+    // PHP row: a list you go and work on rather than a state you watch, and one
+    // that does not belong under the two things this pane exists to show.
+    inProcess
+      ? button("Jobs", () => openCron(refresh), {
+          icon: "lucide:CalendarClock",
+          title: "Add, edit and run the scheduled jobs",
+        })
+      : null,
     running
       ? button("Stop", async () => {
           await stop(id);

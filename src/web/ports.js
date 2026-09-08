@@ -117,33 +117,23 @@ export function isWebServer(id) {
 }
 
 /**
- * The ports one web server binds.
- *
- * The ACTIVE server keeps the configured pair, because those numbers are in
- * every URL the user has open and in every bookmark. A second web server that
- * is also installed gets a fixed offset instead, so both can be installed and
- * both can run, and trying the other one never means stopping the first.
- *
- * DETERMINISTIC, not allocated. The number is written into the generated
- * vhost's `listen`, so it has to be the same one next time the config is
- * regenerated; a counter would renumber them in whatever order the servers
- * happened to be scanned. 80 and 443 become 8080 and 8443, which are the
- * conventional alternates, and the offset keeps them distinct even when the
- * user has already moved the configured pair up.
+ * The ports a web server binds: the configured pair, whichever server it is.
  *
  * @param {string} id
  * @returns {{ http: number, https: number }}
  */
 export function serverPorts(id) {
-  if (id === config.webServer) return { http: config.httpPort, https: config.httpsPort };
-  // ponytail: a flat offset, so a configured pair exactly 8000 apart (http 443,
-  // https 8443) makes the alternate's HTTP land on the active's HTTPS. That
-  // configuration fails loudly rather than silently - `choosePort` finds the
-  // port in use and says so by name - so the fix is a second offset only if
-  // anyone ever hits it.
-  /** @param {number} p */
-  const shift = (p) => (p + 8000 > 65535 ? p - 8000 : p + 8000);
-  return { http: shift(config.httpPort), https: shift(config.httpsPort) };
+  // Both servers, the same pair, because only one of them ever runs: starting
+  // one stops the other (`services.start`).
+  //
+  // They used to differ - the non-default one took a fixed +8000 - so that both
+  // could serve at once. That was a worse answer to a question nobody asked.
+  // Two web servers up means your project answers on two addresses with two
+  // sets of rules, and the second is the one you did not configure; the port
+  // offset then had to be explained, and it appeared in a URL nobody typed.
+  // One server, on the port you chose, is what a local environment is for.
+  void id;
+  return { http: config.httpPort, https: config.httpsPort };
 }
 
 /**
@@ -155,5 +145,22 @@ export function serverPorts(id) {
  * @returns {number}
  */
 export function plannedPort(id) {
-  return isWebServer(id) ? serverPorts(id).http : defaultPortFor(id);
+  if (isWebServer(id)) return serverPorts(id).http;
+  return config.ports[id] ?? defaultPortFor(id);
+}
+
+/**
+ * Did the user CHOOSE this port, or is it just the convention?
+ *
+ * The difference decides what happens when it is taken. A database on its
+ * conventional 3306 moves out of the way, because nothing is pointing at it
+ * yet and refusing to start would be an obstacle. A database on a port somebody
+ * typed does not move: they typed it because something else is pointing at it,
+ * and silently landing on 3307 would break exactly the thing the choice was
+ * made for.
+ *
+ * @param {string} id @returns {boolean}
+ */
+export function portIsPinned(id) {
+  return isWebServer(id) || config.ports[id] !== undefined;
 }

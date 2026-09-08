@@ -20,7 +20,7 @@ import { setCtx, setConfig } from "./runtime.js";
 import { parseLoungeIndex } from "./registry/servers.js";
 import { matches, isValidSchedule, splitCommand } from "./manager/cron.js";
 import { loadModuleLines } from "./web/serverroot.js";
-import { serverPorts } from "./web/ports.js";
+import { serverPorts, plannedPort, portIsPinned } from "./web/ports.js";
 import { setDirective, getDirective } from "./manager/phpini.js";
 import { compareVersions, majorMinor, isPrerelease } from "./registry/util.js";
 import { versionSatisfies } from "./project/resolve.js";
@@ -268,21 +268,37 @@ test("nothing is written when the modules directory was not found", () => {
   assert.deepEqual(loadModuleLines(new Set(["mod_dir.so"]), null), []);
 });
 
-test("two web servers never plan the same port", () => {
+test("both web servers plan the configured port, because only one runs", () => {
   setCtx(/** @type {any} */ ({ os: { platform: "windows", arch: "x86_64" } }));
-  setConfig({ webServer: "nginx", httpPort: 80, httpsPort: 443 });
-  const active = serverPorts("nginx");
-  const other = serverPorts("apache");
-  assert.deepEqual(active, { http: 80, https: 443 }, "the default server must keep its own ports");
-  assert.notEqual(active.http, other.http);
-  assert.notEqual(active.https, other.https);
-  assert.deepEqual(other, { http: 8080, https: 8443 });
+  setConfig({ webServer: "nginx", httpPort: 80, httpsPort: 443, ports: {} });
+  // They used to differ, so that both could serve at once. Starting one stops
+  // the other now, so the port you configured is the port either of them binds
+  // and no offset has to be explained in a URL.
+  assert.deepEqual(serverPorts("nginx"), { http: 80, https: 443 });
+  assert.deepEqual(serverPorts("apache"), { http: 80, https: 443 });
 
-  // And the offset still separates them once the configured pair has moved,
-  // which a fixed 8080/8443 alternate would not.
   setConfig({ httpPort: 8080, httpsPort: 8443 });
-  assert.notEqual(serverPorts("nginx").http, serverPorts("apache").http);
+  assert.equal(serverPorts("apache").http, 8080, "the setting is the answer for both");
   setConfig({ httpPort: 80, httpsPort: 443 });
+});
+
+test("a port somebody typed is honoured, and never moved out from under them", () => {
+  setCtx(/** @type {any} */ ({ os: { platform: "windows", arch: "x86_64" } }));
+  setConfig({ webServer: "nginx", httpPort: 80, httpsPort: 443, ports: {} });
+
+  // Untouched: the convention, and free to move when something else has it.
+  assert.equal(plannedPort("mysql"), 3306);
+  assert.equal(portIsPinned("mysql"), false);
+
+  // Pinned: the number is used, and `choosePort` must not walk past it - they
+  // typed 3307 because a connection string says 3307.
+  setConfig({ ports: { mysql: 3307 } });
+  assert.equal(plannedPort("mysql"), 3307);
+  assert.equal(portIsPinned("mysql"), true);
+
+  // A web server is always pinned: its port is in every project URL.
+  assert.equal(portIsPinned("nginx"), true);
+  setConfig({ ports: {} });
 });
 
 setCtx(null);

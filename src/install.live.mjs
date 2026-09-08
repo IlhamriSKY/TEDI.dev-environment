@@ -470,39 +470,42 @@ await step("the generated config is accepted by the server it was written for", 
   }
 });
 
-// Both servers, up at the same time, on ports that differ.
+// One web server at a time, and the handover really happens.
 //
-// The whole reason the second web server can exist: it takes a fixed offset
-// instead of the configured pair, writes its own vhost tree and binds
-// alongside. A syntax check cannot show that - only two live processes can.
+// The claim is that starting either of them stops the other and takes the SAME
+// configured port. Two live processes are the only thing that can show it: a
+// unit check can say the two plan the same number, but not that nginx actually
+// let go of it in time for Apache to bind, which is the half that breaks.
 //
-// Deliberately on high ports. Binding 80 here would fight whatever the machine
-// running the check is already serving, and the numbers under test are the
-// OFFSET between the two, not the specific pair.
-await step("both web servers run at once, on ports that differ", async () => {
+// Deliberately on a high port. Binding 80 here would fight whatever the machine
+// running the check is already serving, and what is under test is the handover.
+await step("only one web server runs: starting one stops the other", async () => {
   if (installedOf("nginx").length === 0 || installedOf("apache").length === 0) return;
   setConfig({ webServer: "nginx", httpPort: 18080, httpsPort: 18443, autoHttps: false });
 
-  /** @type {Record<string, number | null>} */
-  const bound = {};
   try {
-    for (const id of ["nginx", "apache"]) {
-      const status = await start(id);
-      if (status.state !== "running") {
-        throw new Error(`${id} did not start: ${status.error ?? "no reason given"}`);
-      }
-      bound[id] = status.port;
+    const first = await start("nginx");
+    if (first.state !== "running") {
+      throw new Error(`nginx did not start: ${first.error ?? "no reason given"}`);
     }
-    if (bound.nginx === bound.apache) {
-      throw new Error(`both servers planned port ${bound.nginx}`);
-    }
-    // Started is not serving. Give each a moment to finish binding, then ask.
     await sleep(600);
-    for (const [id, port] of Object.entries(bound)) {
-      if (port === null) throw new Error(`${id} reported no port`);
-      if (!(await inUse(port))) throw new Error(`${id} is running but nothing answers on ${port}`);
+    if (!(await inUse(18080))) throw new Error("nginx is running but nothing answers on 18080");
+
+    // Apache wants the very port nginx is holding, so this only works if
+    // starting it stopped nginx AND waited for the socket to go quiet.
+    const second = await start("apache");
+    if (second.state !== "running") {
+      throw new Error(`apache did not start: ${second.error ?? "no reason given"}`);
     }
-    console.log(`        nginx :${bound.nginx}, apache :${bound.apache}, both answering`);
+    if (second.port !== first.port) {
+      throw new Error(`apache took ${second.port} rather than the configured ${first.port}`);
+    }
+    if (state.services.get("nginx")?.state === "running") {
+      throw new Error("nginx was left running alongside apache");
+    }
+    await sleep(600);
+    if (!(await inUse(18080))) throw new Error("apache took over but nothing answers on 18080");
+    console.log(`        nginx :${first.port} handed 18080 to apache, one at a time`);
   } finally {
     for (const id of ["nginx", "apache"]) await stop(id).catch(() => {});
   }

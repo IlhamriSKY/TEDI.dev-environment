@@ -23,11 +23,14 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
 - **Virtual hosts with HTTPS.** Every project gets `name.test` (or whatever
   suffix you choose), a generated vhost, a certificate from a local CA, and a
   hosts entry written for you.
-- **Nginx and Apache, side by side.** Both get installed. The one you pick in
-  Settings keeps the ports you configured, because those are the numbers in your
-  URLs; the other takes a fixed offset — 80 and 443 become 8080 and 8443 — so
-  both can run and trying one never means stopping the other. Each writes its
-  own virtual hosts.
+- **Nginx and Apache, one at a time.** Both get installed, and starting either
+  one stops the other, so there is only ever one server on the ports you
+  configured and only ever one set of rules answering your project URLs. Each
+  writes its own virtual hosts, so switching is a click.
+- **Every port is editable.** The port sits on the service row as a field while
+  the service is stopped and as a label once it is bound. A port you type is
+  never moved out from under you — if something else has it, the row says so
+  rather than quietly landing on the next one along.
 - **Databases as services.** MySQL, PostgreSQL and Redis start, stop and
   initialise their data directories from the dashboard.
 - **PHP extensions and Xdebug** on Windows, with compatibility filtering: only
@@ -47,14 +50,14 @@ done. Each is one click, and none of them can strand you.
    authority so `https://` loads without a warning. Anything with no build here
    is reported as such rather than retried.
 3. **Terminal PATH.** _Optional._ Registers the shims folder first on TEDI's
-   terminal PATH, which is what makes `php` resolve to the project's version
-   instead of whatever else your system finds first. Any folder holding a
-   competing `php`, `node` or `composer` is switched **off**, not deleted — you
-   can turn it back on in _Settings → Terminal → Additional PATH_, where the row
-   says which extension added or disabled it.
+   terminal PATH, which is what makes `php`, `node`, `npm` and `composer`
+   resolve to the project's versions instead of whatever else your system finds
+   first. Any folder holding a competing one is switched **off**, not deleted —
+   you can turn it back on in _Settings → Terminal → Additional PATH_, where the
+   row says which extension added or disabled it.
 
-   Press **Not now** if you have your own PHP on the PATH with something running
-   against it. Everything else here works either way; only terminals are
+   Press **Not now** if something on this machine is already running against
+   your own PHP or Node. Everything else here works either way; only terminals are
    affected. The row stays on the checklist, so you can register it whenever you
    want.
 
@@ -80,7 +83,8 @@ the shims read. Add it to your `.gitignore`.
 
 ## Scheduled jobs
 
-A cron of your own, in the **Cron** section. It runs while the environment does,
+A cron of your own, behind **Jobs** on the Cron row in Services. It runs while
+the environment does,
 which is the point: a development scheduler that fires when you are not working
 is a scheduler that surprises you.
 

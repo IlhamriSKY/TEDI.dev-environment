@@ -20,7 +20,7 @@ import { installedOf, resolveVersion } from "./versions.js";
 import { activeVersion } from "./config.js";
 import { fastcgiPort, generate } from "../web/vhost.js";
 import { phpFastCgi } from "../registry/php.js";
-import { plannedPort, isWebServer, inUse, findFree } from "../web/ports.js";
+import { plannedPort, portIsPinned, isWebServer, inUse, findFree } from "../web/ports.js";
 import { serverExe } from "../web/serverroot.js";
 import { startCron, stopCron, isRunning as isCronRunning } from "./cron.js";
 
@@ -79,6 +79,19 @@ export async function start(id) {
       const message = err instanceof Error ? err.message : String(err);
       return setStatus(id, { state: "error", handle: null, error: message });
     }
+  }
+
+  // ONE web server at a time. Starting the other one stops this one first.
+  //
+  // They used to run side by side on offset ports, and that was the wrong trade:
+  // two servers up means a project answers on two addresses under two sets of
+  // rules, the second being the one you did not configure, and the offset then
+  // shows up in a URL nobody typed. Stopping the other one is also what frees
+  // the port before `choosePort` looks at it, which is why this is here and not
+  // further down.
+  if (isWebServer(id)) {
+    const other = id === "nginx" ? "apache" : "nginx";
+    if (state.services.get(other)?.state === "running") await stop(other);
   }
 
   const version = activeVersion(id) ?? installedOf(id)[0]?.version ?? null;
@@ -218,12 +231,13 @@ async function choosePort(id) {
   const wanted = plannedPort(id);
   if (!(await inUse(wanted))) return wanted;
 
-  if (isWebServer(id)) {
-    // Starting anyway fails with an opaque bind error deep in a log file.
+  // A port somebody TYPED is never moved. They typed it because something is
+  // pointing at it, and landing on the next one along would break exactly the
+  // thing the choice was made for. Starting anyway fails with an opaque bind
+  // error deep in a log file, so say it here instead.
+  if (portIsPinned(id)) {
     throw new Error(
-      id === config.webServer
-        ? `Port ${wanted} is already in use. Stop whatever is serving it, or change the HTTP port in Settings.`
-        : `Port ${wanted} is already in use. ${id} runs there because ${config.webServer} is the default web server and holds the configured port.`,
+      `Port ${wanted} is already in use. Stop whatever is serving it, or give ${id} a different port.`,
     );
   }
 

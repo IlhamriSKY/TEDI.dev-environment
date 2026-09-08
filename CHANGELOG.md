@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.1.7
+
+- **One web server at a time.** Starting Nginx stops Apache, and the other way
+  round, so both take the ports you configured and only one set of rules ever
+  answers a project URL. They ran side by side on a `+8000` offset for two
+  releases; that was a worse answer to a question nobody asked, because the
+  second server is the one you did not configure and its offset then turned up
+  in a URL nobody typed.
+
+- **Every port is editable, on the row.** A stopped service shows its port as a
+  field; a running one shows it as a label, because that number is then a fact
+  about a bound socket rather than a request. A web server writes `httpPort`,
+  the real setting, since that number is in every project URL and there has to
+  be exactly one of it. A port you type is never moved out from under you: if
+  something else has it the row says so, where before a database would quietly
+  land on the next port along and break the connection string that was the
+  reason for choosing it. Leave it blank to go back to the convention.
+
+- **Composer and mkcert leave the Runtimes list.** They are still installed,
+  still managed, still counted. But nobody switches them - Composer is one phar
+  run by whichever PHP the project resolved, and mkcert is a single binary
+  managing a machine-wide CA - so a version dropdown and a Remove button were
+  two controls for questions nobody asks, sitting above the two rows that
+  matter.
+
+- **Scheduled jobs move into a dialog**, opened by **Jobs** on the Cron row, the
+  way php.ini opens from the PHP row. A list you go and work on is not a state
+  you watch, and four columns of schedule, command and last-run were pushing the
+  two things the pane exists to show off the bottom of a short pane. The row
+  still says how many jobs there are and whether one is running.
+
+- **"Apply changes" is gone, and the run controls moved to Services.** Every
+  path that changes what the vhosts and the hosts file describe already
+  republishes: adding, removing, enabling or disabling a project, and now
+  changing a port. "Start all" and "Stop all" sit beside the rows they act on
+  rather than in the pane header, where their effect was something you had to
+  remember instead of see.
+
+- The terminal PATH step no longer describes itself as being about PHP. It is
+  `php`, `node`, `npm` and `composer`.
+
 ## 0.1.6
 
 - **Package managers opens on a skeleton, and opens faster.** It surveyed npm,

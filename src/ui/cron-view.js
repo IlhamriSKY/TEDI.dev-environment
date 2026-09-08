@@ -1,4 +1,4 @@
-// The Cron section: the scheduled jobs and what they last did.
+// The scheduled jobs, in a dialog opened from the Cron row in Services.
 //
 // A job row answers the three questions someone has when they look at a
 // scheduler: when does it run, what does it run, and did the last one work.
@@ -10,7 +10,7 @@
 // the thing people paste in from a README; offering a builder instead would
 // mean translating what they already have into clicks.
 
-import { h, row, pill, muted, button, status, section, icon, modal, textInput } from "./el.js";
+import { h, row, pill, muted, button, status, icon, mark, modal, textInput } from "./el.js";
 import {
   listJobs,
   saveJob,
@@ -22,6 +22,7 @@ import {
 import { isRunning as isCronRunning } from "../manager/cron.js";
 import { start } from "../manager/services.js";
 import { paths } from "../core/paths.js";
+import { markFor } from "./marks.js";
 import { state, ctx } from "../runtime.js";
 
 /** @typedef {import("../manager/cron.js").CronJob} CronJob */
@@ -35,30 +36,60 @@ const EXAMPLES = [
 ];
 
 /**
- * @param {() => void} refresh
- * @returns {HTMLElement}
+ * Open the job list.
+ *
+ * A dialog rather than a dashboard section, for the same reason PHP's
+ * configuration and Node's package managers are: this is a list you go and
+ * work on, not a state you watch. A permanent section put four columns of
+ * schedule, command and last-run under the two things the pane exists to
+ * show - what is running, and which projects exist - and pushed them off the
+ * bottom of a short pane. The Services row still says how many jobs there are
+ * and whether any is running, which is the part worth a glance.
+ *
+ * @param {() => void} refreshPane  Repaint the dashboard behind the dialog.
+ * @returns {void}
  */
-export function cronView(refresh) {
+export function openCron(refreshPane) {
+  const body = h("div", {
+    style: "display:flex;flex-direction:column;gap:6px;overflow:auto;min-height:0",
+  });
+
+  /** Rebuild the list, and repaint the pane behind it: the Services row counts
+   *  these jobs and shows whether the scheduler is on. */
+  const draw = () => {
+    body.replaceChildren(...listBody(draw));
+    refreshPane();
+  };
+
+  modal({
+    title: h("span", { style: "display:flex;align-items:center;gap:8px" }, [
+      mark(markFor("cron"), 17),
+      h("strong", {
+        text: "Scheduled jobs",
+        style: "font-size:15px;font-weight:500;line-height:1",
+      }),
+    ]),
+    description:
+      "They run while the scheduler is on, which is while TEDI is. php, node, npm and composer in a job resolve to the version its folder asks for.",
+    body: h("div", { style: "display:flex;flex-direction:column;gap:12px;min-height:0" }, [
+      h("div", { style: "display:flex;gap:5px;align-items:center;justify-content:flex-end" }, [
+        controls(draw),
+      ]),
+      body,
+    ]),
+    width: "min(820px,100%)",
+  });
+
+  draw();
+}
+
+/**
+ * The rows, or the empty state.
+ * @param {() => void} refresh @returns {HTMLElement[]}
+ */
+function listBody(refresh) {
   const jobs = listJobs();
   const rows = jobs.map((job) => jobRow(job, refresh));
-
-  const aside = h("div", { style: "display:flex;gap:5px;align-items:center" }, [
-    // Said here rather than only on the Services row, because this is the
-    // section where a stopped scheduler looks like a broken one: the jobs are
-    // all listed, they all have schedules, and nothing happens.
-    isCronRunning()
-      ? muted("Scheduler running")
-      : button(
-          "Start scheduler",
-          async () => {
-            await start("cron");
-            refresh();
-          },
-          { icon: "lucide:Play", variant: jobs.length ? "primary" : "default" },
-        ),
-    button("Add job", () => openEditor(null, refresh), { variant: "primary", icon: "lucide:Plus" }),
-  ]);
-
   if (rows.length === 0) {
     rows.push(
       h(
@@ -78,8 +109,31 @@ export function cronView(refresh) {
       ),
     );
   }
+  return rows;
+}
 
-  return section("Cron", rows, aside);
+/**
+ * Start the scheduler, and add a job.
+ * @param {() => void} refresh @returns {HTMLElement}
+ */
+function controls(refresh) {
+  const jobs = listJobs();
+  return h("div", { style: "display:flex;gap:5px;align-items:center" }, [
+    // Said here rather than only on the Services row, because this is the
+    // section where a stopped scheduler looks like a broken one: the jobs are
+    // all listed, they all have schedules, and nothing happens.
+    isCronRunning()
+      ? muted("Scheduler running")
+      : button(
+          "Start scheduler",
+          async () => {
+            await start("cron");
+            refresh();
+          },
+          { icon: "lucide:Play", variant: jobs.length ? "primary" : "default" },
+        ),
+    button("Add job", () => openEditor(null, refresh), { variant: "primary", icon: "lucide:Plus" }),
+  ]);
 }
 
 /**

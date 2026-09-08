@@ -16,7 +16,6 @@ import { h, button, muted, section, row, pill, icon, status, progress } from "./
 import { runtimesView } from "./runtimes-view.js";
 import { servicesView } from "./services-view.js";
 import { projectsView } from "./projects-view.js";
-import { cronView } from "./cron-view.js";
 import { state, config, ctx } from "../runtime.js";
 import { paths, layoutDirs } from "../core/paths.js";
 import { ensureDirs, isDir } from "../core/fsx.js";
@@ -28,8 +27,7 @@ import { writeSetting, setSkipTerminalPath } from "../manager/config.js";
 import { CROSS_PLATFORM } from "../manager/defaults.js";
 import { installEverything } from "./install-all.js";
 import { provider } from "../registry/index.js";
-import { refreshStatuses, startAll, stopAll } from "../manager/services.js";
-import { publish } from "../web/publish.js";
+import { refreshStatuses } from "../manager/services.js";
 import { httpsStatus } from "../web/certs.js";
 import { needsRootToBind } from "../web/ports.js";
 import { pathOnTerminal, pathInstruction, registerTerminalPath, canRegisterPath } from "./setup.js";
@@ -102,12 +100,12 @@ async function paint(root, refresh, current) {
   // that they cannot work yet; a single screen that says what is left is both
   // shorter to read and shorter to write.
   if (blocked.length > 0) {
-    root.replaceChildren(header(refresh, false), setupCard(steps, blocked));
+    root.replaceChildren(header(false), setupCard(steps, blocked));
     return;
   }
 
   root.replaceChildren(
-    header(refresh, true),
+    header(true),
     section("Setup", steps.map(stepRow)),
     runtimesView(refresh),
     servicesView(refresh),
@@ -117,7 +115,7 @@ async function paint(root, refresh, current) {
   // appended when it resolves rather than holding the whole panel blank.
   const projects = await projectsView(refresh);
   if (!current()) return;
-  root.append(projects, cronView(refresh));
+  root.append(projects);
 }
 
 /**
@@ -206,8 +204,24 @@ function stepRow(step) {
   return h("div", { style: "display:flex;flex-direction:column;min-width:0" }, [line, step.bar]);
 }
 
-/** @param {() => void} refresh @param {boolean} ready @returns {HTMLElement} */
-function header(refresh, ready) {
+/**
+ * The pane's own line: what this environment is, and where.
+ *
+ * No buttons. "Start all" and "Stop all" sit in the Services section now,
+ * because that is what they act on - a header control that starts five
+ * processes two sections down is one whose effect you have to remember rather
+ * than see.
+ *
+ * "Apply changes" is gone rather than moved. It republished the vhosts, the
+ * certificates and the hosts file by hand, and every path that changes what
+ * those describe already does it: adding, removing, enabling or disabling a
+ * project publishes, changing a port publishes, and starting a web server
+ * regenerates its config first. What is left for it to fix is a hosts file
+ * somebody edited themselves, which is not a button on a dashboard.
+ *
+ * @param {boolean} ready @returns {HTMLElement}
+ */
+function header(ready) {
   return h(
     "div",
     { style: "display:flex;align-items:center;justify-content:space-between;gap:10px" },
@@ -220,52 +234,12 @@ function header(refresh, ready) {
             : "Not set up yet",
         ),
       ]),
-      // The run controls are not merely disabled while setup is unfinished:
-      // there is nothing installed for them to start.
-      ready === false
-        ? null
-        : h("div", { style: "display:flex;gap:6px" }, [
-            button("Apply changes", () => void applyEverything(refresh), { variant: "primary" }),
-            button("Start all", async () => {
-              await startAll();
-              refresh();
-            }),
-            button("Stop all", async () => {
-              await stopAll();
-              refresh();
-            }),
-          ]),
+      // Nothing on the right. "Start all" and "Stop all" moved into the
+      // Services section, beside the rows they act on, and "Apply changes"
+      // is gone entirely - see `header`'s note.
+      null,
     ],
   );
-}
-
-/**
- * Republish everything by hand.
- *
- * `publish()` runs on its own whenever the set of projects changes, so this
- * button is for the cases nothing can observe: a php.ini edit that changed the
- * FastCGI pool, a port changed in Settings, a hosts file someone edited
- * themselves. It does exactly what an add does, so there is only one code path
- * that can put a site on the air.
- *
- * @param {() => void} refresh @returns {Promise<void>}
- */
-async function applyEverything(refresh) {
-  try {
-    const res = await publish();
-    if (!res.hostsOk) {
-      ctx?.ui.toast(res.hostsMessage ?? "The hosts file could not be updated.", {
-        variant: "warning",
-      });
-    }
-    ctx?.ui.toast(`Applied ${res.domains.length} host${res.domains.length === 1 ? "" : "s"}.`, {
-      variant: "success",
-    });
-  } catch (err) {
-    ctx?.ui.toast(err instanceof Error ? err.message : String(err), { variant: "error" });
-  } finally {
-    refresh();
-  }
 }
 
 /**
@@ -451,8 +425,8 @@ async function setupSteps(refresh) {
         : pathSkipped
           ? `Left alone, so your terminals keep resolving the php, node and composer they already find. Everything else here works without it - only the terminal is unaffected. Register whenever you want this environment's runtimes on the PATH.`
           : canRegisterPath()
-            ? `Puts this environment first on TEDI's terminal PATH, so typing "php" runs the PHP above instead of whatever else your system finds first. Any folder holding a competing php, node or composer is switched OFF, not deleted - you can turn it back on in ${pathInstruction()}. Leave it alone if you have something already running against your own PHP.`
-            : `Registers this environment with TEDI's terminals, so typing "php" runs the PHP above. Paste this folder into ${pathInstruction()} → Add folder, then reopen your terminals.`,
+            ? `Puts this environment first on TEDI's terminal PATH, so php, node, npm and composer in a terminal are the versions above rather than whatever your system finds first. Any folder holding a competing one is switched OFF, not deleted - you can turn it back on in ${pathInstruction()}. Leave it alone if something on this machine is already running against your own PHP or Node.`
+            : `Registers this environment with TEDI's terminals, so php, node, npm and composer resolve to the versions above. Paste this folder into ${pathInstruction()} → Add folder, then reopen your terminals.`,
       tag: pill(shims),
       aside: onPath
         ? undefined
