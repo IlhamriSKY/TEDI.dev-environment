@@ -235,6 +235,42 @@ async function builtinExtensions(version) {
 }
 
 /**
+ * The database drivers a fresh php.ini turns on.
+ *
+ * PHP ships these compiled but commented out, so a brand-new environment could
+ * not connect to the MySQL and PostgreSQL it had just installed - and the error
+ * a project gets for a missing driver ("could not find driver") names nothing
+ * you can act on. Everything else stays off: this list is the drivers for the
+ * databases THIS extension runs, not a general opinion about a good php.ini.
+ */
+const DEFAULT_EXTENSIONS = ["mysqli", "pdo_mysql", "pgsql", "pdo_pgsql"];
+
+/**
+ * Turn those on, for the ones this build actually ships.
+ *
+ * Called once, when a php.ini is first created. Never afterwards: a user who
+ * switches one off has decided, and an environment that re-enabled it on the
+ * next launch would be arguing with them.
+ *
+ * @param {string} version
+ * @returns {Promise<string[]>} What was enabled.
+ */
+export async function enableDefaults(version) {
+  const rows = await listExtensions(version);
+  /** @type {string[]} */
+  const turnedOn = [];
+  for (const name of DEFAULT_EXTENSIONS) {
+    const row = rows.find((r) => r.name.toLowerCase() === name);
+    // Absent on a static build, and already on for a build that compiles them
+    // in - both are "nothing to do" rather than something to report.
+    if (!row || row.builtin || row.enabled || !row.present) continue;
+    await enable(row.name, version, true).catch(() => {});
+    turnedOn.push(row.name);
+  }
+  return turnedOn;
+}
+
+/**
  * What is installed and what is on, for one PHP version.
  *
  * `present` comes from the extension directory and `enabled` from php.ini, and

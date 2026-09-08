@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.29
+
+- **The database drivers are on out of the box.** PHP ships `mysqli`,
+  `pdo_mysql`, `pgsql` and `pdo_pgsql` compiled but commented out, so a brand
+  new environment could not reach the MySQL it had just installed - and what a
+  project reports for a missing driver ("could not find driver") names nothing
+  you can act on. A fresh php.ini turns them on, and this release turns them on
+  once for the PHPs you already had. Once: after that, switching one off is your
+  decision and nothing here argues with it.
+
+- **The extension list has a search box.** A working PHP lists sixty-odd
+  extensions in a grid, and "is pdo_pgsql on?" was a question you answered by
+  reading all of them. It filters what is already loaded, so typing costs
+  nothing, and the count above follows the filter.
+
+- **A failed service tints its status-bar icon instead of adding a red dot.**
+  Needs the next TEDI release; the change is in core, not here.
+
 ## 0.1.28
 
 - **PHP has never worked under Apache on Windows, and does now.** Three separate

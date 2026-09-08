@@ -39,14 +39,31 @@ export async function extensionsBlock(version, refresh) {
   const rows = await listExtensions(version);
   const on = rows.filter((r) => r.enabled).length;
 
+  const count = muted(
+    check.ok ? `${on} of ${rows.length} extensions active` : (check.reason ?? ""),
+  );
+
+  // A search box, because a working PHP lists sixty-odd extensions in a grid
+  // and "is pdo_pgsql on?" was a question you answered by reading all of them.
+  // It filters what is already in hand rather than re-listing: the rows come
+  // from one php.ini read and one directory listing, and typing must not repeat
+  // either.
+  const search = textInput("Search extensions");
+  search.style.width = "168px";
+
   const header = h(
     "div",
     { style: "display:flex;align-items:center;justify-content:space-between;gap:8px" },
     [
-      muted(check.ok ? `${on} of ${rows.length} extensions active` : (check.reason ?? "")),
-      check.ok
-        ? button("Add extension", () => void openBrowser(version, refresh), { icon: "lucide:Plus" })
-        : null,
+      count,
+      h("div", { style: "display:flex;align-items:center;gap:5px;flex:none" }, [
+        check.ok ? search : null,
+        check.ok
+          ? button("Add extension", () => void openBrowser(version, refresh), {
+              icon: "lucide:Plus",
+            })
+          : null,
+      ]),
     ],
   );
 
@@ -57,15 +74,27 @@ export async function extensionsBlock(version, refresh) {
   // shapes in two different places, and the honest reading of a tick here is
   // "active", which a compiled-in extension is - permanently. It simply does
   // not take a click, and says why.
-  const list = rows.length
-    ? h(
-        "div",
-        {
-          style: "display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px",
-        },
-        rows.map((info) => extensionChip(info, version, refresh, check.ok)),
-      )
-    : null;
+  const list = h("div", {
+    style: "display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px",
+  });
+
+  const draw = () => {
+    const q = search.value.trim().toLowerCase();
+    const hits = q ? rows.filter((r) => r.name.toLowerCase().includes(q)) : rows;
+    list.replaceChildren(
+      ...(hits.length
+        ? hits.map((info) => extensionChip(info, version, refresh, check.ok))
+        : [muted(`Nothing matches "${search.value.trim()}".`)]),
+    );
+    count.textContent = q
+      ? `${hits.filter((r) => r.enabled).length} of ${hits.length} matching are active`
+      : check.ok
+        ? `${on} of ${rows.length} extensions active`
+        : (check.reason ?? "");
+  };
+
+  search.addEventListener("input", draw);
+  draw();
 
   return h("div", { style: "display:flex;flex-direction:column;gap:8px" }, [header, list]);
 }

@@ -29,13 +29,14 @@ import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { setCtx, setConfig, state } from "./runtime.js";
+import { setCtx, setConfig, state, exeSuffix } from "./runtime.js";
 import { provider } from "./registry/index.js";
 import { install, uninstall, installRoot, verify } from "./manager/install.js";
 import { scanInstalled, installedOf } from "./manager/versions.js";
 import { addProject, discoverProjects } from "./project/projects.js";
 import { migrateLayout } from "./manager/migrate.js";
 import { iniPathFor } from "./manager/phpini.js";
+import { listExtensions } from "./manager/phpext.js";
 import { saveJob, runJob } from "./manager/cron.js";
 import { writeShims } from "./project/shims.js";
 import { writeGlobalEnv, applyRuntimeChange } from "./manager/apply.js";
@@ -53,7 +54,7 @@ import {
 import { portOwner, freePort } from "./web/portowner.js";
 import { run, sleep } from "./core/proc.js";
 import { ensureDirs } from "./core/fsx.js";
-import { layoutDirs, paths } from "./core/paths.js";
+import { layoutDirs, paths, join } from "./core/paths.js";
 
 const root = mkdtempSync(path.join(tmpdir(), "devenv-live-"));
 
@@ -408,6 +409,28 @@ await step("php: installs with a usable php.ini, not without one", async () => {
   // copied verbatim would leave the commented-out default in place.
   if (!/^date\.timezone\s*=/m.test(ini)) throw new Error("php.ini was not seeded with defaults");
 
+  // The database drivers this environment exists to talk to. PHP ships them
+  // commented out, so without this a brand-new setup cannot connect to the
+  // MySQL it just installed and the error names nothing you can act on.
+  const drivers = ["mysqli", "pdo_mysql", "pgsql", "pdo_pgsql"];
+  const rows = await listExtensions(target);
+  for (const name of drivers) {
+    const row = rows.find((r) => r.name.toLowerCase() === name);
+    // A build that does not ship one is not a failure; a build that ships it
+    // and leaves it off is.
+    if (!row || !row.present || row.builtin) continue;
+    if (!row.enabled) throw new Error(`${name} ships with this PHP and was left off`);
+  }
+  // And PHP itself has to agree, which is the part a php.ini edit can get wrong
+  // in a way that only shows as a startup warning on every command.
+  const loaded = (await run(join(installedOf("php")[0].binDir, `php${exeSuffix()}`), ["-m"])).out;
+  const missing = drivers.filter(
+    (name) =>
+      rows.find((r) => r.name.toLowerCase() === name)?.present &&
+      !loaded.toLowerCase().includes(name),
+  );
+  if (missing.length) throw new Error(`declared but not loaded by php -m: ${missing.join(", ")}`);
+
   // And running it a second time must not rewrite what the user has since
   // edited - `ensureIni` returns early when the file is there.
   writeFileSync(info.path, ini + "\n; edited by hand\n");
@@ -415,7 +438,9 @@ await step("php: installs with a usable php.ini, not without one", async () => {
   if (!readFileSync(info.path, "utf8").includes("; edited by hand")) {
     throw new Error("a later apply overwrote the user's php.ini");
   }
-  console.log(`        php ${target} -> ${info.path}, extension_dir ok`);
+  console.log(
+    `        php ${target} -> ${info.path}, extension_dir ok, drivers ${drivers.join(", ")}`,
+  );
 });
 
 // Nginx, so the config check below has both servers to hand a config to.

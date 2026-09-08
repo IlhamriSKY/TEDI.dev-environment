@@ -21,13 +21,15 @@
 // cycle.
 
 import { scanInstalled, globalBinDirs, installedOf } from "./versions.js";
-import { ensureIni } from "./phpini.js";
+import { ensureIni, iniPathFor } from "./phpini.js";
+import { enableDefaults } from "./phpext.js";
 import { refreshAllRuntimes } from "../project/projects.js";
 import { renderEnvFile } from "../project/shims.js";
 import { writeText } from "../core/fsx.js";
 import { paths } from "../core/paths.js";
 import { publishHandoff } from "./handoff.js";
 import { config, warn } from "../runtime.js";
+import { markDriversSeeded } from "./config.js";
 
 /**
  * Write the shim fallback: what a directory with no `.tedi-runtime` resolves to.
@@ -66,10 +68,26 @@ export async function writeGlobalEnv() {
  * @returns {Promise<void>}
  */
 export async function ensurePhpInis() {
+  // Once, for the installs that predate this: a php.ini seeded by an earlier
+  // release has the database drivers commented out, and the environment cannot
+  // reach the MySQL it installed. Recorded in config so it is a one-off rather
+  // than an argument with anyone who later switches one off.
+  const backfill = !config.driversSeeded;
+
   for (const row of installedOf("php")) {
     if (row.origin !== "download") continue;
+    // Whether the file is about to be CREATED, asked before it is. A fresh
+    // php.ini gets the database drivers turned on; an existing one is left
+    // alone, because a user who switched one off has decided.
+    const before = await iniPathFor(row.version);
+    const fresh = before !== null && !before.exists;
     await ensureIni(row.version).catch((err) => warn("could not seed php.ini", row.version, err));
+    if (!fresh && !backfill) continue;
+    const on = await enableDefaults(row.version).catch(() => []);
+    if (on.length) warn(`enabled ${on.join(", ")} for PHP ${row.version}`);
   }
+
+  if (backfill) await markDriversSeeded();
 }
 
 /**

@@ -46,7 +46,8 @@ const SETTING_KEYS = /** @type {const} */ ([
  * without the context of the question.
  *
  * @typedef {{ defaults?: Record<string, string>, ports?: Record<string, number>,
- *             autostart?: Record<string, boolean>, skipTerminalPath?: boolean }} StoredConfig
+ *             autostart?: Record<string, boolean>, driversSeeded?: boolean,
+ *             skipTerminalPath?: boolean }} StoredConfig
  */
 
 /**
@@ -106,6 +107,7 @@ export async function loadConfig() {
     defaults: stored.defaults ?? {},
     ports: stored.ports ?? {},
     autostart: stored.autostart ?? {},
+    driversSeeded: stored.driversSeeded === true,
     skipTerminalPath: stored.skipTerminalPath === true,
   });
 }
@@ -118,6 +120,7 @@ async function saveConfig() {
     defaults: config.defaults,
     ports: config.ports,
     autostart: config.autostart,
+    driversSeeded: config.driversSeeded,
     skipTerminalPath: config.skipTerminalPath,
   };
   await writeJson(paths.configFile(), stored);
@@ -164,6 +167,12 @@ export async function setStartsWithAll(id, on) {
   if (on === !OFF_BY_DEFAULT.has(id)) delete next[id];
   else next[id] = on;
   setConfig({ autostart: next });
+  await saveConfig();
+}
+
+/** Remember that the one-off driver pass has run. @returns {Promise<void>} */
+export async function markDriversSeeded() {
+  setConfig({ driversSeeded: true });
   await saveConfig();
 }
 
