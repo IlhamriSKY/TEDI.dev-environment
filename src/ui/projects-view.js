@@ -21,11 +21,11 @@ import {
   textInput,
 } from "./el.js";
 import {
-  domainOf,
   addProject,
   updateProject,
   removeProject,
   discoverProjects,
+  projectUrl,
   slug,
 } from "../project/projects.js";
 import { resolveProject } from "../project/resolve.js";
@@ -100,7 +100,6 @@ export async function projectsView(refresh) {
  * @returns {Promise<HTMLElement>}
  */
 async function projectRow(project, refresh) {
-  const domain = domainOf(project);
   // ONE resolve, not two. `resolveProject` already calls `readRequests` and
   // returns the very `sources` object it produced, so asking for it again
   // re-read `.nvmrc`, `.node-version` and `composer.json` for every project on
@@ -108,9 +107,7 @@ async function projectRow(project, refresh) {
   // hand.
   const resolved = await resolveProject(project);
   const enabled = project.enabled !== false;
-  const scheme = (project.https ?? config.autoHttps) ? "https" : "http";
-  const port = scheme === "https" ? config.httpsPort : config.httpPort;
-  const url = `${scheme}://${domain}${isDefaultPort(scheme, port) ? "" : `:${port}`}`;
+  const url = projectUrl(project);
 
   const left = h(
     "div",
@@ -196,12 +193,6 @@ async function projectRow(project, refresh) {
   ]);
 
   return row([left, middle, right]);
-}
-
-/** 80 and 443 are implied by the scheme; showing them is noise.
- *  @param {string} scheme @param {number} port @returns {boolean} */
-function isDefaultPort(scheme, port) {
-  return (scheme === "http" && port === 80) || (scheme === "https" && port === 443);
 }
 
 /**

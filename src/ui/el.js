@@ -980,6 +980,26 @@ export function input(value, onCommit, placeholder = "") {
 }
 
 /**
+ * One labelled setting: what it is, what it does, and the control.
+ *
+ * Every dialog in this pane lays a setting out this way, and three copies of
+ * the same twenty lines is how they drift.
+ *
+ * @param {string} title @param {string} note @param {Node | null} control
+ * @returns {HTMLElement}
+ */
+export function settingRow(title, note, control) {
+  return row([
+    h("div", { style: "display:flex;flex-direction:column;gap:0;min-width:0" }, [
+      h("span", { text: title, style: "font-size:12px;font-weight:600;line-height:1" }),
+      muted(note),
+    ]),
+    h("div", { style: "flex:1" }),
+    control,
+  ]);
+}
+
+/**
  * Ask before doing something that cannot be undone.
  *
  * Every Remove in this pane used to fire on the first click, and they are not

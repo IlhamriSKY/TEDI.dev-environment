@@ -279,11 +279,6 @@ export function isMac() {
   return ctx?.os?.platform === "macos";
 }
 
-/** Normalised CPU architecture, as the download providers spell it. */
-export function arch() {
-  return ctx?.os?.arch === "aarch64" ? "arm64" : "x64";
-}
-
 /** Executable suffix for this platform. */
 export function exeSuffix() {
   return isWindows() ? ".exe" : "";
@@ -295,9 +290,4 @@ export function exeSuffix() {
  *  @param {...unknown} args */
 export function warn(...args) {
   ctx?.logger?.warn?.("[devenv]", ...args);
-}
-
-/** @param {...unknown} args */
-export function fail(...args) {
-  ctx?.logger?.error?.("[devenv]", ...args);
 }

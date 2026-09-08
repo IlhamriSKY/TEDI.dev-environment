@@ -27,12 +27,12 @@ import { warn } from "../runtime.js";
 
 /** Where the file lives. Fixed, so a reader needs no configuration.
  *  @returns {string} */
-export function handoffFile() {
+function handoffFile() {
   return join(paths.home(), ".tedi", "dev-environment.json");
 }
 
-export const HANDOFF_KIND = "tedi-dev-environment";
-export const HANDOFF_VERSION = 1;
+const HANDOFF_KIND = "tedi-dev-environment";
+const HANDOFF_VERSION = 1;
 
 /** The database services worth offering, and who to log in as.
  *  Both are trust/insecure auth on loopback, set up that way at init. */

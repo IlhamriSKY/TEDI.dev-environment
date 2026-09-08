@@ -22,6 +22,7 @@ import {
   checkbox,
   modal,
   confirm,
+  settingRow,
 } from "./el.js";
 import { markFor } from "./marks.js";
 import { provider } from "../registry/index.js";
@@ -51,6 +52,17 @@ import { freePort } from "../web/portowner.js";
 import { publish } from "../web/publish.js";
 import { openCron } from "./cron-view.js";
 import { openInstaller } from "./version-picker.js";
+import { openAccounts } from "./mysql-view.js";
+import { viewerReady, openViewer } from "../web/viewer.js";
+import {
+  isInstalled as phpMyAdminInstalled,
+  install as installPhpMyAdmin,
+  latestRelease,
+  phpMyAdminUrl,
+  phpSatisfies,
+  writeConfig as writePhpMyAdminConfig,
+} from "../tools/phpmyadmin.js";
+import { openFolder } from "../core/proc.js";
 import { applyRuntimeChange } from "../manager/apply.js";
 import { state, config, ctx } from "../runtime.js";
 
@@ -98,6 +110,10 @@ export function servicesView(refresh) {
 
   return section("Services", rows, aside);
 }
+
+/** The databases SQL Explorer can open. Redis is a service this extension runs
+ *  and that viewer does not speak, so it gets no handover. */
+const VIEWABLE = new Set(["mysql", "postgres"]);
 
 /**
  * Which installed version this service runs.
@@ -301,9 +317,9 @@ function portPills(id, st, live) {
  * anyone was filling it in. Each field commits on its own like the rest of the
  * pane, so there is no Save and nothing to cancel back to.
  *
- * @param {string} id @returns {void}
+ * @param {string} id @param {() => void} refresh @returns {void}
  */
-function openServiceSettings(id) {
+function openServiceSettings(id, refresh) {
   const p = provider(id);
   const live = ["running", "starting"].includes(state.services.get(id)?.state ?? "");
   // Each commit republishes and re-renders the pane behind the dialog, which
@@ -342,6 +358,14 @@ function openServiceSettings(id) {
             ? pill(`:${state.services.get(id)?.port ?? plannedPort(id)}`)
             : servicePortField(id, done),
         ),
+        id === "mysql"
+          ? settingRow(
+              "Accounts",
+              live ? "Who may connect, and from where." : "Start MySQL to read or change these.",
+              button("Accounts", () => openAccounts(), { icon: "lucide:Users", disabled: !live }),
+            )
+          : null,
+        id === "mysql" ? phpMyAdminRow(refresh) : null,
       ];
 
   dialog = modal({
@@ -355,20 +379,6 @@ function openServiceSettings(id) {
     ]),
     width: "min(30rem,100%)",
   });
-}
-
-/** One labelled setting, the shape the Settings dialog uses.
- *  @param {string} title @param {string} note @param {Node | null} control
- *  @returns {HTMLElement} */
-function settingRow(title, note, control) {
-  return row([
-    h("div", { style: "display:flex;flex-direction:column;gap:0;min-width:0" }, [
-      h("span", { text: title, style: "font-size:12px;font-weight:600;line-height:1.35" }),
-      muted(note),
-    ]),
-    h("div", { style: "flex:1" }),
-    control,
-  ]);
 }
 
 /** The HTTPS switch. Off means no certificate is issued at all, which is why it
@@ -405,9 +415,67 @@ function webPortField(key, fallback, done) {
 function servicePortField(id, done) {
   return portField(String(plannedPort(id)), String(defaultPortFor(id)), async (next) => {
     await setServicePort(id, next);
+    // Both stored copies of the address: the file another extension reads, and
+    // phpMyAdmin's own config. A port that moves without rewriting them leaves
+    // each dialling the old one and reporting the server as down.
     await publishHandoff();
+    await writePhpMyAdminConfig();
     done();
   });
+}
+
+/**
+ * phpMyAdmin: install it, or open it.
+ *
+ * It is a PHP app served as a project rather than a managed binary, so this row
+ * is the whole of its UI - `tools/phpmyadmin.js` does the rest. Rendered
+ * asynchronously because "is it installed" is a file on disk, and the dialog
+ * has to be on screen before the answer arrives.
+ *
+ * @param {() => void} refresh @returns {HTMLElement}
+ */
+function phpMyAdminRow(refresh) {
+  const slot = h("div", {});
+  void (async () => {
+    const url = (await phpMyAdminInstalled()) ? phpMyAdminUrl() : null;
+    // phpMyAdmin states the PHP range it supports, and this extension installs
+    // 8.5 by default - so the answer is often "no". Saying it before the
+    // download is the difference between an informed choice and a white page.
+    const php = activeVersion("php");
+    const release = url ? null : await latestRelease();
+    const mismatch = release && !phpSatisfies(release.phpVersions, php);
+    slot.replaceChildren(
+      settingRow(
+        "phpMyAdmin",
+        url
+          ? `Served at ${url}, pointed at this MySQL.`
+          : mismatch
+            ? `Version ${release.version} supports PHP ${release.phpVersions}, and this environment is on ${php}. It will install, and may not run.`
+            : "A browser front end for MySQL, served as one of your projects.",
+        url
+          ? button("Open", () => void openFolder(url), {
+              icon: "lucide:ExternalLink",
+              title: url,
+            })
+          : button(
+              "Install",
+              async () => {
+                try {
+                  const at = await installPhpMyAdmin();
+                  ctx?.ui.toast(`phpMyAdmin is served at ${at}.`, { variant: "success" });
+                } catch (err) {
+                  ctx?.ui.toast(err instanceof Error ? err.message : String(err), {
+                    variant: "error",
+                  });
+                }
+                refresh();
+              },
+              { icon: "lucide:Download", variant: "primary" },
+            ),
+      ),
+    );
+  })();
+  return slot;
 }
 
 /**
@@ -551,7 +619,7 @@ function serviceRow(id, refresh) {
     // that does not belong under the two things this pane exists to show.
     inProcess
       ? null
-      : button("", () => openServiceSettings(id), {
+      : button("", () => openServiceSettings(id, refresh), {
           icon: "lucide:Settings2",
           title: `Port${isWebServer(id) ? "s and HTTPS" : ""} for ${p?.label ?? id}`,
         }),
@@ -563,6 +631,18 @@ function serviceRow(id, refresh) {
           spin: busy?.quiet,
           title: busy?.quiet ? busy.text : "Install another " + (p?.label ?? id) + " version",
         }),
+    // Only the databases SQL Explorer can open, and only when it is installed.
+    // Absent is the honest look for a handover with nowhere to go.
+    VIEWABLE.has(id) && viewerReady()
+      ? button(
+          "Viewer",
+          () => {
+            const why = openViewer();
+            if (why) ctx?.ui.toast(why, { variant: "warning" });
+          },
+          { icon: "lucide:Database", title: "Open this database in SQL Explorer" },
+        )
+      : null,
     inProcess
       ? button("Jobs", () => openCron(refresh), {
           icon: "lucide:CalendarClock",

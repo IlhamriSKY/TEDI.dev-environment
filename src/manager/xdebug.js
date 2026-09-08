@@ -88,7 +88,7 @@ export async function install(phpVersion, opts = {}) {
  * @param {{ mode?: string, port?: number, discoverClientHost?: boolean }} settings
  * @returns {Promise<void>}
  */
-export async function configure(phpVersion, settings) {
+async function configure(phpVersion, settings) {
   await ensureIni(phpVersion);
   const info = await iniPathFor(phpVersion);
   if (!info) throw new Error(`PHP ${phpVersion} is not installed.`);

@@ -51,25 +51,6 @@ export async function findFree(start, opts = {}) {
 }
 
 /**
- * Check a set of desired ports and report which are taken.
- *
- * Returned rather than resolved automatically, because a port conflict on the
- * web server is a decision (move ours, or stop theirs) and silently moving to
- * 8080 would leave the user's bookmarks broken with no explanation.
- *
- * @param {{ label: string, port: number }[]} wanted
- * @returns {Promise<{ label: string, port: number, taken: boolean }[]>}
- */
-export async function survey(wanted) {
-  /** @type {{ label: string, port: number, taken: boolean }[]} */
-  const out = [];
-  for (const item of wanted) {
-    out.push({ ...item, taken: await inUse(item.port) });
-  }
-  return out;
-}
-
-/**
  * Does binding this port need elevation on this platform?
  *
  * Unix reserves everything below 1024 for root. Windows does not, which is why

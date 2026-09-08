@@ -63,6 +63,24 @@ export function slug(value) {
 }
 
 /**
+ * Where a project answers.
+ *
+ * The scheme, the port and whether to show it are one rule, and it was written
+ * out twice - once for the projects list and once for phpMyAdmin - which is how
+ * two answers to "what is my URL" appear in the same pane.
+ *
+ * @param {Project} project @returns {string}
+ */
+export function projectUrl(project) {
+  const https = project.https ?? config.autoHttps;
+  const port = https ? config.httpsPort : config.httpPort;
+  const scheme = https ? "https" : "http";
+  // 80 and 443 are implied by the scheme; showing them is noise.
+  const implied = (scheme === "http" && port === 80) || (scheme === "https" && port === 443);
+  return `${scheme}://${domainOf(project)}${implied ? "" : `:${port}`}`;
+}
+
+/**
  * The directory actually served for a project.
  *
  * Defaults to the project root, but a Laravel or Symfony app serves `public/`

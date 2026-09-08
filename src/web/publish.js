@@ -41,9 +41,7 @@ export async function publish(opts = {}) {
   // three project changes ago. The active one is always included even when it
   // has no managed install, because a detected system server is still the one
   // that will be started.
-  const servers = WEB_SERVERS.filter(
-    (id) => id === config.webServer || installedOf(id).length > 0,
-  );
+  const servers = WEB_SERVERS.filter((id) => id === config.webServer || installedOf(id).length > 0);
 
   /** @type {string[]} */
   let domains = [];

@@ -15,6 +15,8 @@ import { ensureDirs } from "./core/fsx.js";
 import { layoutDirs } from "./core/paths.js";
 import { scanInstalled } from "./manager/versions.js";
 import { provider } from "./registry/index.js";
+import { probeViewer } from "./web/viewer.js";
+import { writeConfig as writePhpMyAdminConfig } from "./tools/phpmyadmin.js";
 import { sweepDownloads } from "./manager/install.js";
 import { refreshStatuses, startAll, stopAll, recoverRunning } from "./manager/services.js";
 import { loadProjects, refreshAllRuntimes } from "./project/projects.js";
@@ -95,6 +97,12 @@ export async function activate(context) {
     // Same reason: a database installed before this existed was never published
     // to anyone, and the reader only ever looks at the file.
     await publishHandoff();
+    // The other stored copy of the database address, for a config left behind
+    // by a release that did not rewrite it.
+    await writePhpMyAdminConfig();
+    // Once: which optional extensions are alongside us. A service row renders
+    // synchronously and cannot await a directory probe.
+    await probeViewer();
     // Anything still running from before a crash is taken back over rather than
     // reported as stopped and then failing to start on its own port.
     const recovered = await recoverRunning();

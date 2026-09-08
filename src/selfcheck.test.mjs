@@ -19,6 +19,8 @@ import { plan } from "./core/archive.js";
 import { setCtx, setConfig, state } from "./runtime.js";
 import { startsWithAll } from "./manager/config.js";
 import { parseNetstat, parseTasklist, parseLsof, parseSs } from "./web/portowner.js";
+import { parseAccounts, sqlString } from "./manager/mysqlusers.js";
+import { phpSatisfies } from "./tools/phpmyadmin.js";
 import { parseLoungeIndex } from "./registry/servers.js";
 import { matches, isValidSchedule, splitCommand } from "./manager/cron.js";
 import { loadModuleLines } from "./web/serverroot.js";
@@ -602,6 +604,58 @@ test("every Remove asks first", () => {
     );
     assert.ok(before.includes("if (!ok) return;"), `${file}: ${call} ignores the answer`);
   }
+});
+
+console.log("\nMySQL accounts");
+
+// Two things here can be wrong without anything failing: what comes back from
+// the client, and what goes out to it. A mangled host offers to drop an account
+// that does not exist; a badly escaped password ends its own SQL string.
+
+test("account rows survive the client's batch output", () => {
+  // `mysql --batch --skip-column-names`: tab-separated, no decoration.
+  const out = ["root\tlocalhost", "app\t%", "mysql.sys\tlocalhost", "", "reporter\t10.0.0.5"].join(
+    "\n",
+  );
+  assert.deepEqual(parseAccounts(out), [
+    { user: "root", host: "localhost" },
+    { user: "app", host: "%" },
+    { user: "reporter", host: "10.0.0.5" },
+  ]);
+  // `mysql.*` are internal: they cannot log in, and offering to drop one is
+  // offering to break the server.
+  assert.ok(!parseAccounts(out).some((a) => a.user.startsWith("mysql.")));
+  assert.deepEqual(parseAccounts(""), []);
+});
+
+test("a password cannot end its own SQL string", () => {
+  // The whole reason this is escaped rather than interpolated. A quote would
+  // close the literal and everything after it would be parsed as SQL.
+  assert.equal(sqlString("plain"), "'plain'");
+  assert.equal(sqlString("o'brien"), "'o\\'brien'");
+  // Backslash FIRST, or escaping the quote adds a backslash that then gets
+  // escaped and the string ends early anyway.
+  assert.equal(sqlString("back\\slash"), "'back\\\\slash'");
+  assert.equal(sqlString("'; DROP USER root@localhost; --"), "'\\'; DROP USER root@localhost; --'");
+});
+
+console.log("\nphpMyAdmin");
+
+test("it says when the active PHP is outside the range it supports", () => {
+  // phpmyadmin.net states support as a comma-separated range, and this
+  // extension installs PHP 8.5 by default - so the answer is usually NO, and
+  // saying so up front is the difference between an install and a white page.
+  const range = ">=7.2,<8.4";
+  assert.equal(phpSatisfies(range, "8.3.14"), true);
+  assert.equal(phpSatisfies(range, "7.2.0"), true, "the lower bound is inclusive");
+  assert.equal(phpSatisfies(range, "8.4.0"), false, "the upper bound is not");
+  assert.equal(phpSatisfies(range, "8.5.10"), false);
+  assert.equal(phpSatisfies(range, "7.1.33"), false);
+  // A range that is missing or unparseable must not block an install: the
+  // metadata is theirs, and being wrong about it should cost a warning at most.
+  assert.equal(phpSatisfies(undefined, "8.5.0"), true);
+  assert.equal(phpSatisfies(">=7.2,<8.4", null), true);
+  assert.equal(phpSatisfies("whatever", "8.5.0"), true);
 });
 
 console.log("\nthe status bar follows what is running");

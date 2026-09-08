@@ -379,9 +379,7 @@ function nginxMain(confDir, ports) {
     // flag suggests. With our config under `<root>/conf/nginx/`, a bare
     // `include mime.types` looked for a file beside it and nginx refused to
     // start: `[emerg] CreateFile() "<root>/conf/nginx/mime.types" failed (2)`.
-    ...(confDir
-      ? [`    include       "${conf(join(confDir, "mime.types"))}";`]
-      : FALLBACK_TYPES),
+    ...(confDir ? [`    include       "${conf(join(confDir, "mime.types"))}";`] : FALLBACK_TYPES),
     "    default_type  application/octet-stream;",
     "    sendfile      on;",
     "    keepalive_timeout  65;",

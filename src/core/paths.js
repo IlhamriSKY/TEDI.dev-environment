@@ -42,7 +42,7 @@ export function home() {
 
 /** The configured data root. Falls back to `~/.tedi/devenv`.
  *  @returns {string} */
-export function root() {
+function root() {
   const configured = config.rootDir?.trim();
   if (configured) return configured.replace(/[\\/]+$/, "");
   return join(home(), ".tedi", "devenv");

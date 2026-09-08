@@ -54,6 +54,13 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
   comes up because you pressed Start all is the one that surprises you.
 - **Databases as services.** MySQL, PostgreSQL and Redis start, stop and
   initialise their data directories from the dashboard.
+- **MySQL accounts and phpMyAdmin**, behind the gear on the MySQL row. Add an
+  account, change a password, or install phpMyAdmin - which is served as one of
+  your projects, so it gets a domain and a certificate like everything else, and
+  is pointed at the managed MySQL for you.
+- **Open in SQL Explorer.** If you have that extension, MySQL and PostgreSQL
+  rows carry a button that opens it with the connection already there. Needs
+  TEDI 0.4.48; without either, the button is simply absent.
 - **A port conflict names the culprit.** "Port 80 is already in use" tells you
   nothing you can act on, so the row says which process holds it and offers to
   stop it - behind a confirmation naming exactly what is about to end. Stopping

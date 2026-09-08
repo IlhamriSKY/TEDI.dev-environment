@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.1.22
+
+- **MySQL accounts.** Behind the gear on the MySQL row: who may connect and from
+  where, a password you can change, and new accounts with or without every
+  privilege. This environment starts with `root` and no password, which is right
+  for loopback and wrong for anything you hand to someone else. The SQL is
+  written to a file rather than passed on a command line, because
+  `IDENTIFIED BY '<password>'` in an argument list is readable by every other
+  user on the machine for as long as it runs.
+
+- **phpMyAdmin**, installed from the same gear and served as one of your
+  projects - so it gets a domain, a certificate and a hosts entry from the
+  machinery that was already there, and **Open** puts it in your browser. Its
+  config is pointed at the managed MySQL and rewritten whenever that port moves.
+  If the release does not support the PHP you are on, the row says so before the
+  download rather than after.
+
+- **Open in SQL Explorer**, on the MySQL and PostgreSQL rows, when that
+  extension is installed. The connection details already reached it - they are
+  published to `~/.tedi/dev-environment.json` - and this is the last step that
+  was missing. It reads that file when its panel opens now, so a database you
+  installed a minute ago is there without a restart. Needs TEDI 0.4.48; on an
+  older host, or without that extension, the button is simply absent.
+
+- **Dead code out.** Nine exports nothing imported, three of them functions
+  nothing called at all: an architecture helper superseded by the registry's
+  own, an error logger superseded by `warn`, and a port survey superseded by the
+  port on each row. One project URL instead of two copies of the same
+  scheme-and-port rule, one labelled-setting row instead of three, and the
+  phpMyAdmin unpack uses the archive helper every other download already used.
+
 ## 0.1.21
 
 - **A name beside its status glyph sits level with it.** The project name read

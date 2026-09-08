@@ -38,7 +38,7 @@ import { renderEnvFile, RUNTIME_FILE } from "./shims.js";
  * @param {Project} project
  * @returns {Promise<{ php: string | null, node: string | null, sources: Record<string, string> }>}
  */
-export async function readRequests(project) {
+async function readRequests(project) {
   /** @type {Record<string, string>} */
   const sources = {};
   let php = project.php ?? null;
