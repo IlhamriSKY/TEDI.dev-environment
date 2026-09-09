@@ -8,7 +8,7 @@ Apache, Composer and mkcert. Nothing is shared with a stack you already have
 installed unless you ask it to use one.
 
 ```
-tedi ext install IlhamriSKY/tedi.dev-environment
+tedi ext install IlhamriSKY/TEDI.dev-environment
 ```
 
 Then open the pane with **Ctrl/Cmd + Alt + E**.
@@ -74,7 +74,7 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
   binary this environment would have launched.
 - **The databases show up in SQL Explorer by themselves.** Install MySQL or
   PostgreSQL here and, if you have the
-  [SQL Explorer](https://github.com/IlhamriSKY/tedi.sql-explorer) extension,
+  [SQL Explorer](https://github.com/IlhamriSKY/TEDI.sql-explorer) extension,
   they appear in its Databases list with the right host, port and user already
   filled in. Change a port and the saved connection follows it; remove the
   database and the connection goes with it. Nothing to configure on either side,
