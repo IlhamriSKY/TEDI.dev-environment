@@ -51,7 +51,17 @@ const RUNTIME_IDS = ["php", "node", "composer"];
 /** Fields of a project that decide what the web server serves. A patch touching
  *  any of them needs `republish()`; a pure version pin does not, and paying the
  *  elevation prompt for one would be a UAC dialog for changing a PHP number. */
-const VHOST_FIELDS = ["name", "path", "suffix", "domain", "docRoot", "kind", "proxyPort", "https", "enabled"];
+const VHOST_FIELDS = [
+  "name",
+  "path",
+  "suffix",
+  "domain",
+  "docRoot",
+  "kind",
+  "proxyPort",
+  "https",
+  "enabled",
+];
 
 /** @param {string} id */
 function serviceRow(id) {
@@ -104,9 +114,7 @@ function jobRow(j) {
  *  @param {unknown} ref */
 function projectOr(ref) {
   const needle = String(ref ?? "").trim();
-  const hit = state.projects.find(
-    (p) => p.id === needle || p.name === needle || p.path === needle,
-  );
+  const hit = state.projects.find((p) => p.id === needle || p.name === needle || p.path === needle);
   if (hit) return hit;
   const have = state.projects.map((p) => `${p.name} (${p.id})`).join(", ") || "(none registered)";
   throw new Error(`No project "${needle}". Have: ${have}`);
@@ -342,7 +350,10 @@ function jobOr(ref) {
   const needle = String(ref ?? "").trim();
   const hit = listJobs().find((j) => j.id === needle || j.name === needle);
   if (hit) return hit;
-  const have = listJobs().map((j) => `${j.name} (${j.id})`).join(", ") || "(no jobs)";
+  const have =
+    listJobs()
+      .map((j) => `${j.name} (${j.id})`)
+      .join(", ") || "(no jobs)";
   throw new Error(`No cron job "${needle}". Have: ${have}`);
 }
 
