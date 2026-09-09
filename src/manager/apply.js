@@ -22,14 +22,15 @@
 
 import { scanInstalled, globalBinDirs, installedOf } from "./versions.js";
 import { ensureIni, iniPathFor } from "./phpini.js";
-import { enableDefaults } from "./phpext.js";
+import { enableDefaults, pendingDefaults, SEED_GENERATION } from "./phpext.js";
 import { refreshAllRuntimes } from "../project/projects.js";
 import { renderEnvFile } from "../project/shims.js";
 import { writeText } from "../core/fsx.js";
 import { paths } from "../core/paths.js";
 import { publishHandoff } from "./handoff.js";
 import { config, warn } from "../runtime.js";
-import { markDriversSeeded } from "./config.js";
+import { markDefaultsSeeded } from "./config.js";
+import { reloadPhpPool } from "./services.js";
 
 /**
  * Write the shim fallback: what a directory with no `.tedi-runtime` resolves to.
@@ -68,26 +69,36 @@ export async function writeGlobalEnv() {
  * @returns {Promise<void>}
  */
 export async function ensurePhpInis() {
-  // Once, for the installs that predate this: a php.ini seeded by an earlier
-  // release has the database drivers commented out, and the environment cannot
-  // reach the MySQL it installed. Recorded in config so it is a one-off rather
-  // than an argument with anyone who later switches one off.
-  const backfill = !config.driversSeeded;
+  // Once per wave, for the installs that predate it: a php.ini seeded by an
+  // earlier release has that wave's extensions commented out, so the
+  // environment cannot reach the MySQL it installed (wave one) or run the
+  // Composer and the framework it is there to serve (wave two). Recorded in
+  // config so each wave is a one-off rather than an argument with anyone who
+  // later switches one of them off.
+  const pending = pendingDefaults(config.seedGeneration);
 
   for (const row of installedOf("php")) {
     if (row.origin !== "download") continue;
     // Whether the file is about to be CREATED, asked before it is. A fresh
-    // php.ini gets the database drivers turned on; an existing one is left
-    // alone, because a user who switched one off has decided.
+    // php.ini gets every wave; an existing one gets only the waves it has not
+    // seen, because a user who switched an older one off has decided.
     const before = await iniPathFor(row.version);
     const fresh = before !== null && !before.exists;
     await ensureIni(row.version).catch((err) => warn("could not seed php.ini", row.version, err));
-    if (!fresh && !backfill) continue;
-    const on = await enableDefaults(row.version).catch(() => []);
-    if (on.length) warn(`enabled ${on.join(", ")} for PHP ${row.version}`);
+    if (!fresh && pending.length === 0) continue;
+    const on = await (fresh
+      ? enableDefaults(row.version)
+      : enableDefaults(row.version, pending)
+    ).catch(() => []);
+    if (!on.length) continue;
+    warn(`enabled ${on.join(", ")} for PHP ${row.version}`);
+    // A FastCGI worker read php.ini when it spawned, so a backfill that did not
+    // recycle it would fix the terminal and leave every SITE on that version
+    // failing on the extension we just turned on. No-op when no pool is up.
+    await reloadPhpPool(row.version).catch(() => false);
   }
 
-  if (backfill) await markDriversSeeded();
+  if (config.seedGeneration < SEED_GENERATION) await markDefaultsSeeded(SEED_GENERATION);
 }
 
 /**

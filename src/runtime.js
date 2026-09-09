@@ -35,11 +35,12 @@ export function setCtx(value) {
  *   service up, per id. ABSENT MEANS YES: an environment configured before this
  *   existed keeps starting everything it used to, and a fresh install starts
  *   what it installed. Only ever written by unticking something.
- * @property {boolean} driversSeeded  Whether the database drivers have been
- *   turned on once for the PHPs that were already installed. Recorded rather
- *   than repeated: after the first pass a user who switches one off has
- *   decided, and an environment that turned it back on every launch would be
- *   arguing with them.
+ * @property {number} seedGeneration  How many waves of DEFAULT_WAVES have been
+ *   turned on once for the PHPs that were already installed. A count rather
+ *   than a flag, so a wave added later still reaches an existing environment,
+ *   and recorded rather than repeated: after a wave has run, a user who
+ *   switches one of its extensions off has decided, and an environment that
+ *   turned it back on every launch would be arguing with them.
  * @property {boolean} skipTerminalPath  The user chose to leave the terminal
  *   PATH alone. Their decision, remembered, not a step still outstanding.
  */
@@ -56,7 +57,7 @@ export const config = {
   defaults: {},
   ports: {},
   autostart: {},
-  driversSeeded: false,
+  seedGeneration: 0,
   skipTerminalPath: false,
 };
 

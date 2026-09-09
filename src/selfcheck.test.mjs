@@ -26,6 +26,7 @@ import { matches, isValidSchedule, splitCommand } from "./manager/cron.js";
 import { loadModuleLines } from "./web/serverroot.js";
 import { serverPorts, plannedPort, portIsPinned } from "./web/ports.js";
 import { setDirective, getDirective } from "./manager/phpini.js";
+import { pendingDefaults, SEED_GENERATION } from "./manager/phpext.js";
 import { compareVersions, majorMinor, isPrerelease } from "./registry/util.js";
 import { versionSatisfies } from "./project/resolve.js";
 import { slug, hostname, domainOf } from "./project/projects.js";
@@ -113,6 +114,28 @@ test("a dot in the key is not a wildcard", () => {
 
 test("a commented directive reads as unset, not as its commented value", () => {
   assert.equal(getDirective(";memory_limit = 128M\n", "memory_limit"), null);
+});
+
+test("a wave already seeded is never offered a second time", () => {
+  // The whole point of the generation count: re-offering a wave turns back on
+  // what the user deliberately switched off.
+  const first = pendingDefaults(0);
+  const second = pendingDefaults(1);
+  assert.ok(first.includes("pdo_mysql"), "wave one should be pending for a fresh environment");
+  assert.ok(!second.includes("pdo_mysql"), "wave one was offered again at generation 1");
+});
+
+test("an environment seeded through every wave is offered nothing", () => {
+  assert.deepEqual(pendingDefaults(SEED_GENERATION), []);
+});
+
+test("the framework wave carries what Composer and Laravel cannot boot without", () => {
+  // openssl: no https to packagist, so `composer create-project` never starts.
+  // mbstring: Laravel, Symfony and WordPress all fail at run time without it.
+  const pending = pendingDefaults(1);
+  for (const name of ["openssl", "mbstring", "curl", "fileinfo", "zip"]) {
+    assert.ok(pending.includes(name), `a downloaded PHP would ship without ${name}`);
+  }
 });
 
 test("an inline comment is not part of the value", () => {

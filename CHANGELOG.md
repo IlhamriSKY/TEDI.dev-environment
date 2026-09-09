@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.1.34
+
+- **A PHP this extension installed could not run Composer, let alone Laravel.**
+  A freshly downloaded PHP had four extensions turned on, all of them database
+  drivers, and that is not a PHP anything boots on. Without `openssl` there is
+  no https to packagist, so `composer create-project laravel/laravel` fails
+  before it downloads a byte; without `mbstring` the framework dies at run time
+  with `Call to undefined function Illuminate\Encryption\openssl_cipher_iv_length()`,
+  an error that names an internal function and nothing a user can act on.
+  `curl`, `fileinfo` and `zip` are the next three any real project asks for.
+  Every one of those DLLs was already sitting in the `ext/` directory of the
+  zip we had just unpacked, so the gap cost a download of nothing and a line in
+  a file. The defaults are now two WAVES - the drivers, and what an application
+  cannot boot without - and the config records how many have run rather than a
+  yes/no flag, so an environment installed before this release gets the second
+  wave once, and a wave that has already run is never turned back on over
+  somebody who switched it off. The FastCGI worker for that version is recycled
+  when a wave actually changes something, because a pool reads php.ini when it
+  spawns: without it the terminal would be fixed and every site on that version
+  would keep failing on the extension we had just enabled.
+
+- **The Register button, and every setup step's control, sat under its own row
+  instead of beside it.** The Terminal PATH step put its path pill and its
+  button on a second line at every width, 1140 pixels included, while the Root
+  folder step directly above it looked right - same row helper, same flex rule.
+  Flex decides where a line breaks on an item's hypothetical size, which for a
+  basis of `auto` is the text's full content width, and that step's sentence is
+  three lines of prose: wider than the pane, so the control could never fit
+  beside it. The text is given a basis instead, and the pill and the button
+  become ONE item, because as two siblings they wrapped independently - at 460
+  pixels the pill stayed up, the button dropped, and the row came out taller
+  than it had been before the fix. Measured on the running pane: 97 pixels at
+  1140, 900 and 700 becomes 63, 63 and 94, one line all the way down to 560, and
+  a 260 pixel pane ends up shorter than it started.
+
+- **The Projects list has a search.** It filters on the name, the URL and the
+  path, and it hides rows rather than rebuilding the list: building one project
+  row costs a `resolveProject`, which is three file reads, so a search that
+  rebuilt would re-read every project's `composer.json` on each keystroke. The
+  query is held outside the field for the same reason the accordions are - the
+  pane repaints wholesale on a poll, and a query living only in the input would
+  be wiped mid-typing by a repaint the user did not cause.
+
+- **"Open www" moved up beside Settings.** The folder every project lives in
+  belongs to the environment that the header line already names, not to the list
+  of projects that happen to be inside it, and it is the one control a user
+  reaches for before there is a single project for it to sit beside.
+
 ## 0.1.33
 
 - **The whole environment was invisible to an AI agent.** This extension runs

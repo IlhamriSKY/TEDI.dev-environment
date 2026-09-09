@@ -235,31 +235,66 @@ async function builtinExtensions(version) {
 }
 
 /**
- * The database drivers a fresh php.ini turns on.
+ * What a fresh php.ini turns on, in the waves they were added in.
  *
- * PHP ships these compiled but commented out, so a brand-new environment could
- * not connect to the MySQL and PostgreSQL it had just installed - and the error
- * a project gets for a missing driver ("could not find driver") names nothing
- * you can act on. Everything else stays off: this list is the drivers for the
- * databases THIS extension runs, not a general opinion about a good php.ini.
+ * Wave one is the database drivers. PHP ships these compiled but commented out,
+ * so a brand-new environment could not connect to the MySQL and PostgreSQL it
+ * had just installed - and the error a project gets for a missing driver
+ * ("could not find driver") names nothing you can act on.
+ *
+ * Wave two is what a PHP application cannot boot without, and it is here
+ * because the drivers alone are not a usable PHP. **Composer itself cannot
+ * run** without `openssl`: there is no https to packagist, so
+ * `composer create-project` fails before it downloads anything. Laravel,
+ * Symfony and WordPress all need `mbstring` at run time, and the error names an
+ * internal function nobody can act on either - `Call to undefined function
+ * Illuminate\Encryption\openssl_cipher_iv_length()`. `curl`, `fileinfo` and
+ * `zip` are the next three that any real project asks for. Every one of these
+ * DLLs is already inside the php.net zip we unpacked, so this is a line in a
+ * file, not a download.
+ *
+ * It is still not a general opinion about a good php.ini: it is what the
+ * environment has to have for the things it installs to work at all.
+ *
+ * WAVES, not one list, because seeding is a one-off per wave. An environment
+ * that predates a wave gets that wave once; a user who then switches something
+ * off has decided. Appending to an existing wave would turn their choice back
+ * on at the next launch, which is the one thing this must never do.
  */
-const DEFAULT_EXTENSIONS = ["mysqli", "pdo_mysql", "pgsql", "pdo_pgsql"];
+export const DEFAULT_WAVES = [
+  ["mysqli", "pdo_mysql", "pgsql", "pdo_pgsql"],
+  ["openssl", "mbstring", "curl", "fileinfo", "zip"],
+];
+
+/** An environment seeded through this many waves needs nothing doing to it. */
+export const SEED_GENERATION = DEFAULT_WAVES.length;
+
+/**
+ * The extensions an environment at this generation has not been offered yet.
+ *
+ * @param {number} generation @returns {string[]}
+ */
+export function pendingDefaults(generation) {
+  return DEFAULT_WAVES.slice(generation).flat();
+}
 
 /**
  * Turn those on, for the ones this build actually ships.
  *
- * Called once, when a php.ini is first created. Never afterwards: a user who
- * switches one off has decided, and an environment that re-enabled it on the
- * next launch would be arguing with them.
+ * Called with the full list when a php.ini is first created, and with just the
+ * unseeded waves for an environment that predates them. Never with a wave twice:
+ * a user who switches one off has decided, and an environment that re-enabled it
+ * on the next launch would be arguing with them.
  *
  * @param {string} version
+ * @param {string[]} [names] Defaults to every wave.
  * @returns {Promise<string[]>} What was enabled.
  */
-export async function enableDefaults(version) {
+export async function enableDefaults(version, names = DEFAULT_WAVES.flat()) {
   const rows = await listExtensions(version);
   /** @type {string[]} */
   const turnedOn = [];
-  for (const name of DEFAULT_EXTENSIONS) {
+  for (const name of names) {
     const row = rows.find((r) => r.name.toLowerCase() === name);
     // Absent on a static build, and already on for a build that compiles them
     // in - both are "nothing to do" rather than something to report.

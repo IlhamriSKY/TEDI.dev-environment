@@ -39,6 +39,17 @@ import { state, config, ctx } from "../runtime.js";
 /** @typedef {import("../runtime.js").Project} Project */
 
 /**
+ * What the project search is filtering by.
+ *
+ * Module scope rather than the field's own value, for the same reason the
+ * accordions keep their open state here: the pane re-renders wholesale on every
+ * poll and every action, so a query living only in the input would be wiped by
+ * a repaint the user did not cause. Held as the typed text, matched
+ * case-insensitively against the name, the URL and the path.
+ */
+let query = "";
+
+/**
  * Rendered asynchronously because each row needs the project's resolved
  * runtime, which reads files. The caller mounts a placeholder and replaces it.
  *
@@ -52,15 +63,31 @@ export async function projectsView(refresh) {
     rows.push(await projectRow(project, refresh));
   }
 
+  // Hiding rows rather than rebuilding the list, because building one costs a
+  // `resolveProject` - three file reads - and a search that re-read every
+  // project's `composer.json` on each keystroke is a search that lags. The
+  // original `display` is captured rather than assumed to be `flex`, so the row
+  // helper stays free to change it.
+  const hay = state.projects.map((p) => `${p.name} ${projectUrl(p)} ${p.path}`.toLowerCase());
+  const display = rows.map((el) => el.style.display);
+  const nothing = muted("No project matches that.");
+
+  const field = textInput(`Search ${state.projects.length} projects`, "150px", 24);
+  field.value = query;
+  const applyFilter = () => {
+    query = field.value.trim().toLowerCase();
+    let shown = 0;
+    rows.forEach((el, i) => {
+      const hit = query === "" || hay[i].includes(query);
+      el.style.display = hit ? display[i] : "none";
+      if (hit) shown++;
+    });
+    nothing.style.display = shown === 0 && rows.length > 0 ? "" : "none";
+  };
+  field.addEventListener("input", applyFilter);
+
   const aside = h("div", { style: "display:flex;flex-wrap:wrap;gap:5px;align-items:center" }, [
-    button(
-      "Open www",
-      async () => {
-        await mkdirp(paths.www());
-        await openFolder(paths.www());
-      },
-      { icon: "lucide:FolderOpen", title: paths.www() },
-    ),
+    rows.length > 0 ? field : null,
     button("Refresh", () => void refreshProjects(refresh), {
       icon: "lucide:RefreshCw",
       title: `Pick up anything new in ${paths.www()}`,
@@ -72,27 +99,31 @@ export async function projectsView(refresh) {
     }),
   ]);
 
-  if (rows.length === 0) {
-    rows.push(
-      h(
-        "div",
-        {
-          style:
-            "display:flex;flex-direction:column;align-items:center;gap:4px;padding:14px;" +
-            "border:1px dashed var(--border);border-radius:6px;text-align:center",
-        },
-        [
-          h("span", {
-            text: "No projects yet.",
-            style: "font-size:11.5px;color:var(--muted-foreground)",
-          }),
-          muted(`Press New project, or drop a folder in ${paths.www()} and press Refresh.`),
-        ],
-      ),
-    );
-  }
+  applyFilter();
 
-  return section("Projects", rows, aside);
+  // Kept OUT of `rows`, which the filter indexes against `hay` and `display`
+  // position by position. A placeholder pushed in there would be a row the
+  // filter has no entry for, and the first keystroke would throw on it.
+  const empty =
+    rows.length === 0
+      ? h(
+          "div",
+          {
+            style:
+              "display:flex;flex-direction:column;align-items:center;gap:4px;padding:14px;" +
+              "border:1px dashed var(--border);border-radius:6px;text-align:center",
+          },
+          [
+            h("span", {
+              text: "No projects yet.",
+              style: "font-size:11.5px;color:var(--muted-foreground)",
+            }),
+            muted(`Press New project, or drop a folder in ${paths.www()} and press Refresh.`),
+          ],
+        )
+      : null;
+
+  return section("Projects", [...rows, nothing, empty], aside);
 }
 
 /**

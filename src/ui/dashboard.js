@@ -19,7 +19,7 @@ import { projectsView } from "./projects-view.js";
 import { openSettings } from "./settings-view.js";
 import { state, config, ctx } from "../runtime.js";
 import { paths, layoutDirs } from "../core/paths.js";
-import { ensureDirs, isDir } from "../core/fsx.js";
+import { ensureDirs, isDir, mkdirp } from "../core/fsx.js";
 import { openFolder } from "../core/proc.js";
 import { shimDir, writeShims } from "../project/shims.js";
 import { scanInstalled, installedOf } from "../manager/versions.js";
@@ -191,19 +191,48 @@ function setupCard(steps, blocked) {
  * @param {Step} step @returns {HTMLElement}
  */
 function stepRow(step) {
+  // The tag and the control are ONE flex item, and the text has a BASIS rather
+  // than `auto`. Both halves are needed and neither is obvious, so they were
+  // measured on the live pane rather than argued about:
+  //
+  //   - `flex:1 1 auto` sizes the text on its own content, and the Terminal
+  //     PATH step's sentence is three lines long, so its hypothetical width ate
+  //     the whole line and pushed the control under it at EVERY width, 1140
+  //     included. A basis of 240px is what the line-breaking is decided on
+  //     instead; grow still fills the space that is left, so nothing changes on
+  //     a wide pane except that the control is now beside the words.
+  //   - Grouped, because as two siblings the pill and the button wrap
+  //     independently: at 460px the pill stayed up and the button dropped, and
+  //     the row was TALLER than before the fix (143px against 112px).
+  //
+  // Measured heights for this step, ungrouped-and-`auto` against this: 97/97/97
+  // at 1140/900/700 becomes 63/63/94, one line down to 560px, and 260px comes
+  // out shorter than it started (173px against 202px).
+  const controls =
+    step.tag || step.aside
+      ? h("div", { style: "display:flex;align-items:center;gap:10px;flex:0 0 auto" }, [
+          step.tag ?? null,
+          step.aside ?? null,
+        ])
+      : null;
   const line = row([
-    h("div", { style: "display:flex;align-items:center;gap:10px;flex:1 1 auto;min-width:0" }, [
-      status(step.working ? "working" : step.note ? "warn" : step.done ? "ok" : "idle"),
-      icon(step.icon, step.done ? "var(--primary)" : "var(--muted-foreground)"),
-      h("div", { style: "display:flex;flex-direction:column;gap:1px;flex:1;min-width:0" }, [
-        h("span", { style: "display:flex;align-items:center;gap:6px" }, [
-          h("span", { text: step.title, style: "font-size:12px;font-weight:600" }),
+    h(
+      "div",
+      {
+        style: "display:flex;align-items:center;gap:10px;flex:1 1 240px;min-width:min(240px,100%)",
+      },
+      [
+        status(step.working ? "working" : step.note ? "warn" : step.done ? "ok" : "idle"),
+        icon(step.icon, step.done ? "var(--primary)" : "var(--muted-foreground)"),
+        h("div", { style: "display:flex;flex-direction:column;gap:1px;flex:1;min-width:0" }, [
+          h("span", { style: "display:flex;align-items:center;gap:6px" }, [
+            h("span", { text: step.title, style: "font-size:12px;font-weight:600" }),
+          ]),
+          muted(step.detail),
         ]),
-        muted(step.detail),
-      ]),
-    ]),
-    step.tag ?? null,
-    step.aside ?? null,
+      ],
+    ),
+    controls,
   ]);
   if (!step.bar) return line;
   // Flush under its own row rather than in a status area of its own, so which
@@ -214,10 +243,14 @@ function stepRow(step) {
 /**
  * The pane's own line: what this environment is, and where.
  *
- * No buttons. "Start all" and "Stop all" sit in the Services section now,
- * because that is what they act on - a header control that starts five
- * processes two sections down is one whose effect you have to remember rather
- * than see.
+ * Only the controls that act on the WHOLE environment. "Start all" and "Stop
+ * all" sit in the Services section, because that is what they act on - a header
+ * control that starts five processes two sections down is one whose effect you
+ * have to remember rather than see. "Open www" is the opposite case and is why
+ * it moved up here from the Projects section: the folder every project lives in
+ * belongs to the environment this line already names, not to the list of
+ * projects that happen to be in it, and it is the one control a user reaches
+ * for before there is a single project to put it beside.
  *
  * "Apply changes" is gone rather than moved. It republished the vhosts, the
  * certificates and the hosts file by hand, and every path that changes what
@@ -244,16 +277,24 @@ function header(ready, refresh) {
             : "Not set up yet",
         ),
       ]),
-      // "Start all" and "Stop all" are in the Services section, beside the rows
-      // they act on. What is up here is the two settings that belong to the
-      // whole environment rather than to any one row - and they are a dialog,
-      // not a section, because a pane you scroll to the bottom of to change the
-      // domain suffix twice a year is a pane whose last screenful is furniture.
+      // Settings is a dialog rather than a section because a pane you scroll to
+      // the bottom of to change the domain suffix twice a year is a pane whose
+      // last screenful is furniture.
       ready
-        ? button("Settings", () => openSettings(refresh), {
-            icon: "lucide:Settings",
-            title: "Domain suffix and the hosts file",
-          })
+        ? h("div", { style: "display:flex;align-items:center;gap:5px" }, [
+            button(
+              "Open www",
+              async () => {
+                await mkdirp(paths.www());
+                await openFolder(paths.www());
+              },
+              { icon: "lucide:FolderOpen", title: paths.www() },
+            ),
+            button("Settings", () => openSettings(refresh), {
+              icon: "lucide:Settings",
+              title: "Domain suffix and the hosts file",
+            }),
+          ])
         : null,
     ],
   );

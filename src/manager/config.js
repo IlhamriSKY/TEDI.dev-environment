@@ -47,8 +47,8 @@ const SETTING_KEYS = /** @type {const} */ ([
  * without the context of the question.
  *
  * @typedef {{ defaults?: Record<string, string>, ports?: Record<string, number>,
- *             autostart?: Record<string, boolean>, driversSeeded?: boolean,
- *             skipTerminalPath?: boolean }} StoredConfig
+ *             autostart?: Record<string, boolean>, seedGeneration?: number,
+ *             driversSeeded?: boolean, skipTerminalPath?: boolean }} StoredConfig
  */
 
 /**
@@ -101,7 +101,14 @@ export async function loadConfig() {
     defaults: stored.defaults ?? {},
     ports: stored.ports ?? {},
     autostart: stored.autostart ?? {},
-    driversSeeded: stored.driversSeeded === true,
+    // `driversSeeded` is what the count used to be, before a second wave of
+    // extensions existed. True means wave one has run, which is generation 1.
+    seedGeneration:
+      typeof stored.seedGeneration === "number"
+        ? stored.seedGeneration
+        : stored.driversSeeded === true
+          ? 1
+          : 0,
     skipTerminalPath: stored.skipTerminalPath === true,
   });
 }
@@ -114,7 +121,7 @@ async function saveConfig() {
     defaults: config.defaults,
     ports: config.ports,
     autostart: config.autostart,
-    driversSeeded: config.driversSeeded,
+    seedGeneration: config.seedGeneration,
     skipTerminalPath: config.skipTerminalPath,
   };
   await writeJson(paths.configFile(), stored);
@@ -164,9 +171,10 @@ export async function setStartsWithAll(id, on) {
   await saveConfig();
 }
 
-/** Remember that the one-off driver pass has run. @returns {Promise<void>} */
-export async function markDriversSeeded() {
-  setConfig({ driversSeeded: true });
+/** Remember which waves the one-off extension pass has run.
+ *  @param {number} generation @returns {Promise<void>} */
+export async function markDefaultsSeeded(generation) {
+  setConfig({ seedGeneration: generation });
   await saveConfig();
 }
 
