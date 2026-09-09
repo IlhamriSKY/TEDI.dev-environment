@@ -620,7 +620,13 @@ export function actionsMenu(items, opts = {}) {
   if (live.length === 0) return null;
 
   const wrap = h("div", { style: "position:relative;display:inline-flex;flex:none" });
-  const btn = button("", () => {}, { icon: "lucide:MoreHorizontal", title: opts.title ?? "More" });
+  // `Ellipsis`, not `MoreHorizontal`. The host resolves `lucide:<Name>` against
+  // lucide's `icons` RECORD, and that record holds only canonical names -
+  // `MoreHorizontal` is one of 245 deprecated aliases that lucide still exports
+  // as a component but leaves out of the record. The lookup returned null, the
+  // host rendered its empty placeholder span, and every row grew a blank square
+  // where the menu button should be. Nothing threw; it just was not there.
+  const btn = button("", () => {}, { icon: "lucide:Ellipsis", title: opts.title ?? "More" });
 
   /** @type {HTMLElement | null} */
   let panel = null;

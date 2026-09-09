@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.37
+
+- **The new overflow menu was a blank square.** Its button asked for
+  `lucide:MoreHorizontal`, and the host resolves `lucide:<Name>` against
+  lucide's `icons` RECORD - which holds canonical names only. `MoreHorizontal`
+  is one of 245 names lucide still exports as a component but leaves out of that
+  record, so the lookup returned null, the host rendered its empty placeholder,
+  and every row in the pane grew an empty button next to its real one. Nothing
+  threw and nothing warned; the glyph simply was not there. It is `Ellipsis`
+  now, and all 41 icon references in this extension were checked against the
+  record: that was the only one missing.
+
 ## 0.1.36
 
 - **The FastCGI worker recycled itself out of existence after 500 requests.**
