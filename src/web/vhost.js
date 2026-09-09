@@ -20,7 +20,7 @@
 
 import { paths, join } from "../core/paths.js";
 import { writeText, mkdirp, remove, readDir } from "../core/fsx.js";
-import { config, state } from "../runtime.js";
+import { config, state, warn } from "../runtime.js";
 import { servedProject } from "../tools/phpmyadmin.js";
 import { domainOf, docRootOf } from "../project/projects.js";
 import { resolveProject } from "../project/resolve.js";
@@ -107,6 +107,16 @@ export async function generate(projects, server = config.webServer) {
     if (project.enabled === false) continue;
     const domain = domainOf(project);
     const root = await docRootOf(project);
+    // Every path in a generated config sits inside a quoted string, and a
+    // folder name may legally contain a quote or a newline on macOS and Linux
+    // - `www/` is SCANNED, so an unpacked archive is enough to put one there.
+    // Skipped rather than escaped: the value has to stay a real path, and a
+    // site that quietly does not publish is a far better outcome than a server
+    // config with someone else's directives in it.
+    if (/["\r\n]/.test(root)) {
+      warn("skipping a project whose folder name cannot go in a config file", root);
+      continue;
+    }
     const runtime = await resolveProject(project);
     const https = project.https ?? config.autoHttps;
     const cert = https ? await certificateFor([domain, `www.${domain}`]) : null;

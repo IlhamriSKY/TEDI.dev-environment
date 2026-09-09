@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.1.32
+
+- **A domain suffix could become a path, or a server directive.** Everything
+  downstream trusts the domain a project is served at: it is the FILENAME of
+  the generated virtual host, the `server_name` and `ServerName` lines, a row
+  in the hosts file, and a name on a certificate. Nothing escaped it and
+  nothing checked it. Typing `../../../../evil` into the domain suffix wrote
+  the virtual host outside its own directory, and a suffix containing a newline
+  closed the generated `server {` block and opened another one, which is enough
+  to serve a drive root on a port of your choosing. The Settings field was only
+  the shortest way in: `projects.json` and the settings file are ordinary files
+  that anything on the machine can write, so the check is on the domain itself
+  and not on the field. A suffix is now cleaned label by label, which keeps a
+  legitimate `local.test` intact while `..` becomes nothing at all, and falls
+  back rather than serving a site at a name nobody chose.
+
+- **A setting was clean when it was loaded and raw when it was written.** The
+  domain suffix was normalised on the way in at startup and not on the way out
+  when you typed one, so a value typed into Settings was used as-is for the
+  rest of the session and only became safe after a restart. Both paths go
+  through one rule per setting now, which is also what makes the ports a number
+  whichever way they arrived.
+
+- **A folder name that cannot go inside a quoted string is skipped, not
+  escaped.** Every path in a generated config sits in quotes, and on macOS and
+  Linux a folder name may contain a quote or a newline. `www/` is scanned, so
+  unpacking an archive is enough to put one there. Such a project is left
+  unpublished with a line in the log rather than escaped into something that is
+  no longer the real path.
+
+- **The elevated hosts write could be ended early by the file it carries.** The
+  content is handed to a root shell inside a quoted heredoc, and a heredoc ends
+  at a line equal to its terminator: a hosts file containing that exact line
+  would have ended it early and handed the rest of the file over as commands.
+  Writing the hosts file already needs root, so this was never a way in, but
+  the Windows branch had been defusing its own terminator all along and the
+  other had not. Now both do.
+
+- The note above `icon` described the approach that was tried and abandoned -
+  moving one cached node rather than copying it - which is the one that makes
+  two rows sharing a glyph render only once. The code was right; the note would
+  have talked the next reader into the bug.
+
 ## 0.1.31
 
 - **Every MySQL account action failed with a SQL syntax error.** Creating an

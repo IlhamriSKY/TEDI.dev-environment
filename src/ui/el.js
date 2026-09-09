@@ -326,10 +326,11 @@ function tip(el, text) {
  *
  * `ctx.ui.icon` mounts a REACT ROOT per call and the host only unmounts them on
  * deactivate, so calling it once per row per repaint leaks a root every time the
- * panel redraws. Each icon name appears exactly once in a paint, so the master
- * node is cached and MOVED into its new position rather than cloned - which
- * also sidesteps the second trap, that a clone taken before the host's lazy
- * chunk lands is permanently empty.
+ * panel redraws. One master per icon NAME is therefore cached for the life of
+ * the extension, kept OUT of the document, and each use gets a COPY of the SVG
+ * it rendered. See `fill` below for why a copy and not the master itself, and
+ * for the second trap: a copy taken before the host's lazy chunk lands is
+ * permanently empty, so it is retried briefly.
  *
  * @param {string} name    A `lucide:<Name>` reference.
  * @param {string} [colour] CSS colour for the glyph.

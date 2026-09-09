@@ -13,7 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, readFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { renderHosts, MARKERS, wouldLose } from "./web/hosts.js";
+import { renderHosts, MARKERS, wouldLose, heredocMarker } from "./web/hosts.js";
 import { SHIMS, windowsShim, posixShim } from "./project/shims.js";
 import { plan } from "./core/archive.js";
 import { setCtx, setConfig, state } from "./runtime.js";
@@ -28,7 +28,7 @@ import { serverPorts, plannedPort, portIsPinned } from "./web/ports.js";
 import { setDirective, getDirective } from "./manager/phpini.js";
 import { compareVersions, majorMinor, isPrerelease } from "./registry/util.js";
 import { versionSatisfies } from "./project/resolve.js";
-import { slug } from "./project/projects.js";
+import { slug, hostname, domainOf } from "./project/projects.js";
 import { fastcgiPort, renderVhost } from "./web/vhost.js";
 import { offeredConnections } from "./manager/handoff.js";
 import { releaseDate } from "./ui/version-picker.js";
@@ -173,6 +173,37 @@ test("a folder name becomes a legal hostname label", () => {
   assert.equal(slug("My Shop (v2)"), "my-shop-v2");
   assert.equal(slug("---"), "project");
   assert.ok(slug("a".repeat(200)).length <= 63);
+});
+
+test("a domain suffix cannot become a path or a config directive", () => {
+  // Everything downstream trusts the domain: it is the vhost FILENAME, the
+  // `server_name` / `ServerName` line, a row in the hosts file and a name on a
+  // certificate. All four were reachable by typing into the Settings field.
+  //
+  // Measured before the guard: a suffix of `../../../../evil` wrote the vhost
+  // to `<vhosts>/shop./../../../evil.conf`, and one containing a newline
+  // closed the generated `server {` block and opened another.
+  assert.equal(hostname("../../../../evil"), "evil");
+  assert.equal(
+    hostname('test\n}\nserver { listen 8080; root "C:/"; #'),
+    "test-server-listen-8080-root-c",
+  );
+  assert.equal(hostname("my test"), "my-test");
+  // Dots are what separates a suffix from a label, so they SURVIVE. Slugging
+  // the whole string would turn `local.test` into `local-test`.
+  assert.equal(hostname("local.test"), "local.test");
+  // Nothing usable left is the empty string, so a caller can fall back rather
+  // than serve a site at a name nobody chose.
+  assert.equal(hostname("///..."), "");
+  assert.ok(hostname("a".repeat(300)).length <= 253);
+
+  // And the guard is on `domainOf`, not only on the settings field, because
+  // `projects.json` is an ordinary file something else can write.
+  const project = { id: "p", name: "shop", kind: "php", enabled: true };
+  assert.equal(domainOf({ ...project, suffix: "../../evil" }), "shop.evil");
+  assert.equal(domainOf({ ...project, domain: "../../boom\nevil" }), "boom-evil");
+  // An unusable suffix falls back rather than producing `shop.`.
+  assert.equal(domainOf({ ...project, suffix: "..." }), "shop.test");
 });
 
 test("the FastCGI port is stable for a version and differs between versions", () => {
@@ -653,6 +684,18 @@ for (const server of ["nginx", "apache"]) {
     assert.ok(!/:8080:8443/.test(out), "the http port must not survive into the target");
   });
 }
+
+test("the elevated hosts write cannot be ended early by the file it carries", () => {
+  // The content is handed to a ROOT shell as a quoted heredoc. A line equal to
+  // the terminator ends it, and everything after it becomes commands.
+  assert.equal(heredocMarker("127.0.0.1\tshop.test\n"), "TEDI_DEVENV_HOSTS_EOF");
+  const hostile = "ok\nTEDI_DEVENV_HOSTS_EOF\nrm -rf /\n";
+  const marker = heredocMarker(hostile);
+  assert.notEqual(marker, "TEDI_DEVENV_HOSTS_EOF");
+  assert.ok(!hostile.split(/\r?\n/).some((l) => l.trim() === marker));
+  // Whitespace around it still terminates a heredoc, so trimming is the test.
+  assert.notEqual(heredocMarker("a\n  TEDI_DEVENV_HOSTS_EOF  \nb"), "TEDI_DEVENV_HOSTS_EOF");
+});
 
 console.log("\nwhat gets a vhost");
 

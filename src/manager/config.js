@@ -24,6 +24,7 @@
 import { ctx, config, setConfig, warn } from "../runtime.js";
 import { paths } from "../core/paths.js";
 import { readJson, writeJson } from "../core/fsx.js";
+import { hostname } from "../project/projects.js";
 
 /** Keys owned by the extension settings store, with their fallbacks. */
 const SETTING_KEYS = /** @type {const} */ ([
@@ -84,15 +85,8 @@ export async function loadConfig() {
   /** @type {Record<string, unknown>} */
   const patch = {};
   for (const [key, fallback] of SETTING_KEYS) {
-    patch[key] = await setting(key, fallback);
+    patch[key] = normalise(key, await setting(key, fallback));
   }
-  // Ports arrive as strings from a number input that was typed into.
-  patch.httpPort = toPort(patch.httpPort, 80);
-  patch.httpsPort = toPort(patch.httpsPort, 443);
-  patch.domainSuffix =
-    String(patch.domainSuffix ?? "test")
-      .replace(/^\.+/, "")
-      .trim() || "test";
   setConfig(patch);
 
   // No `ensureDirs` here, deliberately. Creating the environment's directories
@@ -211,6 +205,26 @@ export async function setSkipTerminalPath(skip) {
 }
 
 /**
+ * What a stored setting is allowed to be.
+ *
+ * One rule per key, applied BOTH when a setting is read at startup and when one
+ * is written, because those were two different answers: the load path cleaned
+ * the domain suffix and the write path did not, so a suffix typed into Settings
+ * was used raw for the whole session and only became safe after a restart.
+ *
+ * @param {string} key @param {unknown} value @returns {unknown}
+ */
+function normalise(key, value) {
+  // Ports arrive as strings from a number input that was typed into.
+  if (key === "httpPort") return toPort(value, 80);
+  if (key === "httpsPort") return toPort(value, 443);
+  // See `hostname`: this string ends up as a filename and as a server
+  // directive, so "usable hostname" is the only thing it is allowed to be.
+  if (key === "domainSuffix") return hostname(value) || "test";
+  return value;
+}
+
+/**
  * A port value that survived a text input.
  * @param {unknown} value @param {number} fallback @returns {number}
  */
@@ -252,9 +266,10 @@ export async function setActiveVersion(componentId, version) {
  * @param {string} key @param {unknown} value @returns {Promise<void>}
  */
 export async function writeSetting(key, value) {
+  const clean = normalise(key, value);
   try {
-    await ctx?.settings.set(key, value);
-    setConfig({ [key]: value });
+    await ctx?.settings.set(key, clean);
+    setConfig({ [key]: clean });
   } catch (err) {
     warn("could not write setting", key, err);
   }

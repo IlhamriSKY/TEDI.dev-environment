@@ -501,7 +501,15 @@ if (process.platform === "win32") {
 // cannot tell you whether `/usr/sbin/conf/mime.types` exists; `nginx -t` can.
 //
 // HTTPS is switched off for it, so the check does not depend on a local CA
-// having been installed on the machine running it.
+// having been installed on the machine running it. That leaves ONE branch of
+// the generator unproven here - the port-80 redirect a site gets when it has a
+// certificate - because `nginx -t` loads the certificate as well as parsing the
+// file, so covering it would mean downloading mkcert and touching the running
+// machine's CAROOT on every run. It is covered instead by the rendered-output
+// checks in `selfcheck.test.mjs`, and was verified once against real nginx
+// 1.31.5 and Apache 2.4.68 at both default and moved ports: both accepted it,
+// and Apache served the 302 with the hostname, path and query preserved. If
+// that branch is changed, run `nginx -t` against it by hand.
 await step("the generated config is accepted by the server it was written for", async () => {
   const site = path.join(root, "www", "example");
   mkdirSync(site, { recursive: true });

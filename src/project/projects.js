@@ -43,9 +43,51 @@ async function saveProjects() {
  * @param {Project} project @returns {string}
  */
 export function domainOf(project) {
-  if (project.domain) return project.domain.toLowerCase();
-  const suffix = (project.suffix ?? config.domainSuffix).replace(/^\.+/, "");
-  return `${slug(project.name)}.${suffix}`.toLowerCase();
+  // Everything downstream trusts this string: it becomes a FILENAME in the
+  // vhost directory, a `server_name` / `ServerName` line, a row in the hosts
+  // file and a name on a certificate. None of those escape it, so this is the
+  // one place that can make them safe, and it guards rather than assumes -
+  // `projects.json` and the settings file are ordinary files that something
+  // other than this UI can write.
+  //
+  // Before this guard, a domain suffix of `../../../../evil` wrote the vhost
+  // outside its own directory, and one containing a newline closed the
+  // generated `server {` block and opened another of the attacker's choosing.
+  // Both were reachable from the Settings field by typing.
+  if (project.domain) {
+    const explicit = hostname(project.domain);
+    if (explicit) return explicit;
+  }
+  const suffix = hostname(project.suffix ?? config.domainSuffix) || "test";
+  return `${slug(project.name)}.${suffix}`;
+}
+
+/**
+ * A whole hostname, label by label.
+ *
+ * `slug` is the rule for ONE label; a suffix is allowed to have dots in it
+ * (`local.test`), so it cannot simply be slugged whole or the dots become
+ * hyphens. Labels that survive as nothing are dropped, which is what turns
+ * `..` into the empty string rather than into a path.
+ *
+ * Returns `""` when nothing usable is left, so a caller can fall back rather
+ * than serve a site at a name it did not choose.
+ *
+ * @param {unknown} value @returns {string}
+ */
+export function hostname(value) {
+  return String(value)
+    .toLowerCase()
+    .split(".")
+    .map((label) =>
+      label
+        .replace(/[^a-z0-9-]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 63),
+    )
+    .filter(Boolean)
+    .join(".")
+    .slice(0, 253);
 }
 
 /**

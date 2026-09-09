@@ -193,7 +193,7 @@ function writeScript(content) {
       `Set-Content -LiteralPath '${target}' -Value $content -Encoding ASCII -NoNewline`,
     ];
   }
-  const marker = "TEDI_DEVENV_HOSTS_EOF";
+  const marker = heredocMarker(content);
   return [
     `cp "${target}" "${target}.tedi-backup" 2>/dev/null || true`,
     `cat > "${target}" <<'${marker}'`,
@@ -201,6 +201,25 @@ function writeScript(content) {
     marker,
     `chmod 644 "${target}"`,
   ];
+}
+
+/**
+ * A heredoc terminator that cannot appear in `content`.
+ *
+ * The same care the Windows branch takes with its here-string terminator. A
+ * heredoc ends at a line equal to the marker, so a hosts file that happens to
+ * contain that exact line would end it early and hand the REST of the file to
+ * a ROOT shell as commands. Writing the hosts file already needs root, so this
+ * is not a way in - but one branch defusing its terminator while the other
+ * ignores the question is how the second one ends up wrong later.
+ *
+ * @param {string} content @returns {string}
+ */
+export function heredocMarker(content) {
+  let marker = "TEDI_DEVENV_HOSTS_EOF";
+  const lines = content.split(/\r?\n/);
+  while (lines.some((line) => line.trim() === marker)) marker += "_X";
+  return marker;
 }
 
 /** The marker pair, exported so the dashboard can show the user what block it
