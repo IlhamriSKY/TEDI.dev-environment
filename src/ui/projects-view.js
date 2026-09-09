@@ -19,6 +19,7 @@ import {
   confirm,
   modal,
   textInput,
+  actionsMenu,
 } from "./el.js";
 import {
   addProject,
@@ -183,55 +184,63 @@ async function projectRow(project, refresh) {
     "div",
     { style: "display:flex;align-items:center;gap:5px;flex:0 1 auto;min-width:0;flex-wrap:wrap" },
     [
-      // The URL above IS a link, and inside the app a link is a small target that
-      // has to be aimed at. This is the same destination as a button, next to the
-      // one that opens the folder, so "show me this project" is one shape whether
-      // you mean the files or the site.
-      button("Browser", () => openFolder(url), {
+      // ONE primary action - open the site - and the rest behind the overflow
+      // menu. Five buttons on a project row is what made this pane unusable at
+      // the width an extension pane actually gets.
+      button("Open", () => openFolder(url), {
         icon: "lucide:ExternalLink",
         title: `Open ${url} in your browser`,
         disabled: !enabled,
       }),
-      button("Folder", () => openFolder(project.path), {
-        icon: "lucide:FolderOpen",
-        title: `Open ${project.path} in the file manager`,
-      }),
-      // Feature-detected, not declared with `engines.tedi`: an older host simply
-      // does not show the button, rather than refusing to install the extension
-      // over one row control. `ctx.tabs.openTerminal` landed in TEDI 0.4.46.
-      typeof ctx?.tabs?.openTerminal === "function"
-        ? button("Terminal", () => void openProjectTerminal(project), {
-            icon: "lucide:SquareTerminal",
-            title: `Open a terminal in ${project.path}`,
-          })
-        : null,
-      button(
-        enabled ? "Disable" : "Enable",
-        async () => {
-          await updateProject(project.id, { enabled: !enabled });
-          // A disabled project has to stop being SERVED, not just look grey.
-          await republish();
-          refresh();
-        },
-        enabled
-          ? { variant: "danger", icon: "lucide:PowerOff" }
-          : { variant: "success", icon: "lucide:Power" },
-      ),
-      button(
-        "Remove",
-        async () => {
-          const ok = await confirm({
-            title: `Remove ${project.name}?`,
-            description:
-              "Its virtual host, certificate and hosts entry go. The folder and everything " +
-              "in it stays exactly where it is.",
-          });
-          if (!ok) return;
-          await removeProject(project.id);
-          await republish();
-          refresh();
-        },
-        { variant: "danger" },
+      actionsMenu(
+        /** @type {any} */ (
+          [
+            {
+              label: "Open folder",
+              icon: "lucide:FolderOpen",
+              onClick: () => openFolder(project.path),
+            },
+            // Feature-detected, not declared with `engines.tedi`: an older host
+            // simply does not offer the item rather than refusing to install the
+            // extension over one row control. `ctx.tabs.openTerminal` landed in
+            // TEDI 0.4.46.
+            typeof ctx?.tabs?.openTerminal === "function"
+              ? {
+                  label: "Open terminal here",
+                  icon: "lucide:SquareTerminal",
+                  onClick: () => void openProjectTerminal(project),
+                }
+              : null,
+            {
+              label: enabled ? "Disable" : "Enable",
+              icon: enabled ? "lucide:PowerOff" : "lucide:Power",
+              onClick: async () => {
+                await updateProject(project.id, { enabled: !enabled });
+                // A disabled project has to stop being SERVED, not just look grey.
+                await republish();
+                refresh();
+              },
+            },
+            {
+              label: "Remove project",
+              icon: "lucide:Trash2",
+              danger: true,
+              onClick: async () => {
+                const ok = await confirm({
+                  title: `Remove ${project.name}?`,
+                  description:
+                    "Its virtual host, certificate and hosts entry go. The folder and everything " +
+                    "in it stays exactly where it is.",
+                });
+                if (!ok) return;
+                await removeProject(project.id);
+                await republish();
+                refresh();
+              },
+            },
+          ].filter(Boolean)
+        ),
+        { title: `More for ${project.name}` },
       ),
     ],
   );

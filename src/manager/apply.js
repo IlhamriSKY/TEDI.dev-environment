@@ -21,7 +21,7 @@
 // cycle.
 
 import { scanInstalled, globalBinDirs, installedOf } from "./versions.js";
-import { ensureIni, iniPathFor } from "./phpini.js";
+import { ensureIni, iniPathFor, applySettings } from "./phpini.js";
 import { enableDefaults, pendingDefaults, SEED_GENERATION } from "./phpext.js";
 import { refreshAllRuntimes } from "../project/projects.js";
 import { renderEnvFile } from "../project/shims.js";
@@ -86,12 +86,19 @@ export async function ensurePhpInis() {
     const fresh = before !== null && !before.exists;
     await ensureIni(row.version).catch((err) => warn("could not seed php.ini", row.version, err));
     if (!fresh && pending.length === 0) continue;
-    const on = await (fresh
-      ? enableDefaults(row.version)
-      : enableDefaults(row.version, pending)
+    const on = await (
+      fresh ? enableDefaults(row.version) : enableDefaults(row.version, pending)
     ).catch(() => []);
     if (!on.length) continue;
     warn(`enabled ${on.join(", ")} for PHP ${row.version}`);
+    // An environment that predates the OPcache wave has a php.ini without the
+    // revalidation setting, and the stock 2 seconds is exactly the surprise a
+    // developer must never get from a cache they did not ask for.
+    if (on.some((n) => n.toLowerCase() === "opcache")) {
+      await applySettings(row.version, { "opcache.revalidate_freq": "0" }).catch((err) =>
+        warn("could not set opcache.revalidate_freq", row.version, err),
+      );
+    }
     // A FastCGI worker read php.ini when it spawned, so a backfill that did not
     // recycle it would fix the terminal and leave every SITE on that version
     // failing on the extension we just turned on. No-op when no pool is up.

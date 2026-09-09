@@ -1,5 +1,62 @@
 # Changelog
 
+## 0.1.36
+
+- **The FastCGI worker recycled itself out of existence after 500 requests.**
+  php-cgi exits once it has served `PHP_FCGI_MAX_REQUESTS`, which defaults to
+  500, on the assumption that a process manager will start a replacement.
+  Nothing here was watching, so it simply stopped and every site on that PHP
+  version answered 502 until the user restarted something by hand. Measured at
+  three different concurrencies before the fix, the worker died after 498, 499
+  and 499 requests - the same number every time, which is what gave the cause
+  away. A page load with its assets is a dozen requests, so 500 is an afternoon.
+  The limit can only be set through the environment, and `shell_bg_spawn_direct`
+  passes none, so the worker now starts through a generated `pool.cmd` that sets
+  it to 0 first. Safe on Windows specifically: the supervisor holds a
+  kill-on-close job object, so stopping the pool still stops php-cgi, and
+  cmd.exe waits on the worker, so a dead worker is still a dead handle.
+
+- **OPcache was never turned on, and it is worth 4.8x.** Same PHP, same
+  application, same machine, one variable changed: 230.1 ms per request without
+  it, 47.7 ms with it. It ships as the third wave of default extensions, paired
+  with `opcache.revalidate_freq = 0` - the stock 2 seconds is exactly the "I
+  saved it, I refreshed, nothing changed" surprise a development machine must
+  never hand anybody. Nothing else measured: JIT, a bigger opcache and a warmed
+  realpath cache were each inside the run-to-run spread across an interleaved,
+  order-randomised set of runs, so none of them is shipped. The fastest
+  configuration turned out to be the plainest one.
+
+- **PHP 8.5 compiles OPcache in, and said so in a name nothing recognised.**
+  `php -m` prints it as "Zend OPcache", which matches neither the DLL nor the
+  ini directive, so on 8.5 the pane listed a row called "zend opcache" that no
+  other part of the extension could see - and the defaults pass could not tell
+  it was already built in. Normalised at the one place that reads `php -m`.
+
+- **An extension installed from PECL could not load its own libraries.**
+  Everything ending in `.dll` went into `ext/`, including the libraries the
+  extension links against - imagick brings eight of ImageMagick's. Windows
+  resolves a module's dependencies from the directory of the EXECUTABLE, never
+  from the directory of the module, so those files were invisible there and PHP
+  reported "Unable to load dynamic library php_imagick.dll - The specified
+  module could not be found", naming the one file that was in the right place.
+  `php_*.dll` now goes to `ext/` and every other library beside php.exe.
+
+- **Xdebug can be parked without uninstalling it.** The mode list offers `off`,
+  which is loaded-but-idle: 46 ms per request against 85.5 ms on
+  `develop,debug`, measured on the same machine and application. Roughly half
+  the response time back on a day you are not stepping through anything.
+
+- **The pane is usable at the width it actually gets.** A running MySQL row
+  carried six buttons plus a version picker and two port pills; at 400px that
+  was three lines of controls wrapped around one line of fact, with Stop
+  somewhere in the middle of them. Every row now keeps ONE primary action -
+  Start/Stop, Open, Configure - and puts the rest behind an overflow menu that
+  opens leftwards so it stays inside a narrow pane. A service that has failed
+  moves its message out of the middle of the row onto a line of its own
+  underneath, where a sentence belongs and where it stops pushing the controls
+  sideways. Measured on a failing MySQL row: 137px tall at 520px wide becomes
+  77px, and 181px at 320px becomes 127px.
+
 ## 0.1.35
 
 - **`npm` never worked through the shims on Windows.** The generated shim

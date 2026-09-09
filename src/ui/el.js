@@ -553,6 +553,149 @@ export function dropdown(options, selected, onChange, opts = {}) {
 }
 
 /**
+ * A full-width line that drops UNDER the rest of a row.
+ *
+ * A failure message used to sit in the middle group, between a version picker
+ * and the buttons, where it pushed everything else sideways and, on a narrow
+ * pane, wrapped into the middle of the controls. It is a sentence, not a
+ * control, so it belongs on a line of its own.
+ *
+ * No new container: `row()` already wraps, so a child with a 100% basis lands on
+ * its own line INSIDE the same card. Anything else would draw a second border
+ * under the first.
+ *
+ * @param {string} text
+ * @param {"error" | "warn" | "muted"} [tone]
+ * @returns {HTMLElement}
+ */
+export function noteLine(text, tone = "error") {
+  const colour =
+    tone === "error"
+      ? "var(--destructive)"
+      : tone === "warn"
+        ? "var(--tedi-icon-working, #facc15)"
+        : "var(--muted-foreground)";
+  return h(
+    "div",
+    {
+      style:
+        "flex:1 1 100%;min-width:0;display:flex;align-items:flex-start;gap:6px;" +
+        "padding-top:2px;border-top:1px solid var(--border);margin-top:2px",
+    },
+    [
+      h("span", {
+        text: tone === "muted" ? "" : "!",
+        style:
+          `flex:none;width:13px;height:13px;margin-top:1px;border-radius:999px;font-size:9px;` +
+          `font-weight:700;line-height:13px;text-align:center;color:var(--background);` +
+          `background:${colour};${tone === "muted" ? "display:none" : ""}`,
+      }),
+      h("span", {
+        text,
+        style: `flex:1;min-width:0;color:${colour};font-size:10.5px;line-height:1.45;word-break:break-word`,
+      }),
+    ],
+  );
+}
+
+/**
+ * The overflow menu for a row's secondary actions.
+ *
+ * A running MySQL row carried six buttons - settings, install, phpMyAdmin,
+ * viewer, stop, restart - plus a version picker and two port pills. At a pane
+ * width of 400px that is three lines of controls around one line of fact, and
+ * the one button anybody presses (Stop) is somewhere in the middle of it. Only
+ * the primary action stays on the row; everything else comes in here.
+ *
+ * The panel is anchored to the RIGHT edge of its button, because the button
+ * sits at the right end of a row: opening leftwards is what keeps it inside a
+ * narrow pane instead of pushing a scrollbar onto the whole panel.
+ *
+ * @param {{ label: string, icon?: string, onClick: () => void, disabled?: boolean, danger?: boolean }[]} items
+ * @param {{ title?: string }} [opts]
+ * @returns {HTMLElement | null}
+ */
+export function actionsMenu(items, opts = {}) {
+  const live = items.filter(Boolean);
+  if (live.length === 0) return null;
+
+  const wrap = h("div", { style: "position:relative;display:inline-flex;flex:none" });
+  const btn = button("", () => {}, { icon: "lucide:MoreHorizontal", title: opts.title ?? "More" });
+
+  /** @type {HTMLElement | null} */
+  let panel = null;
+  const close = () => {
+    panel?.remove();
+    panel = null;
+    document.removeEventListener("pointerdown", onOutside, true);
+    document.removeEventListener("keydown", onKey, true);
+  };
+  /** @param {Event} ev */
+  const onOutside = (ev) => {
+    if (!wrap.contains(/** @type {Node} */ (ev.target))) close();
+  };
+  /** @param {KeyboardEvent} ev */
+  const onKey = (ev) => {
+    if (ev.key === "Escape") {
+      ev.stopPropagation();
+      close();
+    }
+  };
+
+  btn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    if (panel) return close();
+    panel = h(
+      "div",
+      {
+        style:
+          "position:absolute;top:calc(100% + 4px);right:0;z-index:40;min-width:170px;" +
+          "padding:4px;border-radius:var(--radius, 8px);border:1px solid var(--border);" +
+          "background:var(--popover, var(--background));box-shadow:0 10px 30px rgba(0,0,0,.35)",
+      },
+      live.map((item) =>
+        h(
+          "button",
+          {
+            style:
+              `display:flex;align-items:center;gap:7px;width:100%;text-align:left;padding:6px 9px;` +
+              `border:0;border-radius:${PILL};font-size:11px;white-space:nowrap;background:transparent;` +
+              `color:${item.danger ? "var(--destructive)" : "var(--foreground)"};` +
+              `cursor:${item.disabled ? "not-allowed" : "pointer"};opacity:${item.disabled ? ".45" : "1"}`,
+            attrs: item.disabled ? { disabled: "true" } : {},
+            on: {
+              click: (e) => {
+                e.stopPropagation();
+                if (item.disabled) return;
+                close();
+                item.onClick();
+              },
+              mouseenter: (e) => {
+                if (item.disabled) return;
+                /** @type {HTMLElement} */ (e.currentTarget).style.background = "var(--accent)";
+              },
+              mouseleave: (e) => {
+                /** @type {HTMLElement} */ (e.currentTarget).style.background = "transparent";
+              },
+            },
+          },
+          [
+            item.icon ? icon(item.icon, "currentColor", 13) : null,
+            h("span", { text: item.label, style: "flex:1" }),
+          ],
+        ),
+      ),
+    );
+    wrap.append(panel);
+    document.addEventListener("pointerdown", onOutside, true);
+    document.addEventListener("keydown", onKey, true);
+  });
+
+  wrap.append(btn);
+  return wrap;
+}
+
+/**
  * A checkbox, drawn flat the way `components/ui/checkbox.tsx` draws one.
  *
  * A native `<input type="checkbox">` was here, tinted with `accent-color`. That

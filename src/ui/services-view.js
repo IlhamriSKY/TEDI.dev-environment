@@ -23,6 +23,8 @@ import {
   modal,
   confirm,
   settingRow,
+  noteLine,
+  actionsMenu,
 } from "./el.js";
 import { markFor } from "./marks.js";
 import { provider } from "../registry/index.js";
@@ -665,15 +667,11 @@ function serviceRow(id, refresh) {
       // The tick on the left says which web server serves; a second control
       // saying the same thing was one to keep in agreement for nothing.
 
-      failed && st?.error
-        ? h("span", {
-            text: st.error,
-            style: "color:var(--destructive);font-size:11px;line-height:1.4",
-          })
-        : null,
       // The one error with an action behind it. Offered only when the OS
       // actually named the process: "stop whatever has port 80" is not
-      // something anyone should be asked to press blind.
+      // something anyone should be asked to press blind. It stays on the row
+      // rather than going into the overflow menu, because it is the button you
+      // need exactly when the row has gone red.
       st?.conflict ? freeButton(id, st.conflict, refresh) : null,
     ],
   );
@@ -682,54 +680,66 @@ function serviceRow(id, refresh) {
   // Stop stays Stop while a version list is being fetched: the two have
   // nothing to do with each other, and greying it out said otherwise.
   const disabled = !present || Boolean(loud);
+  // ONE primary action per row, and everything else behind the overflow menu.
+  // A running MySQL row used to carry six buttons; at 400px that was three
+  // lines of controls wrapped around one line of fact, with Stop somewhere in
+  // the middle of them.
+  const secondary = [
+    running
+      ? {
+          label: "Restart",
+          icon: "lucide:RotateCw",
+          onClick: async () => {
+            await restart(id);
+            refresh();
+          },
+        }
+      : null,
+    inProcess
+      ? {
+          label: "Jobs",
+          icon: "lucide:CalendarClock",
+          onClick: () => openCron(refresh),
+        }
+      : null,
+    inProcess
+      ? null
+      : {
+          label: `Port${isWebServer(id) ? "s and HTTPS" : ""}`,
+          icon: "lucide:Settings2",
+          onClick: () => openServiceSettings(id, refresh),
+        },
+    inProcess
+      ? null
+      : {
+          label: "Install another version",
+          icon: "lucide:Download",
+          disabled: Boolean(busy),
+          onClick: () => p && void openInstaller(p, refresh),
+        },
+    id === "mysql" && phpMyAdminInstalledNow()
+      ? {
+          label: "phpMyAdmin",
+          icon: "lucide:ExternalLink",
+          onClick: () => void openFolder(phpMyAdminUrl()),
+        }
+      : null,
+    VIEWABLE.has(id) && viewerReady()
+      ? {
+          label: "Open in SQL Explorer",
+          icon: "lucide:Database",
+          onClick: () => {
+            const why = openViewer();
+            if (why) ctx?.ui.toast(why, { variant: "warning" });
+          },
+        }
+      : null,
+  ].filter(Boolean);
+
   const right = h(
     "div",
     { style: "display:flex;align-items:center;gap:5px;flex:0 1 auto;min-width:0;flex-wrap:wrap" },
     [
-      // The scheduler's contents open FROM its row, like php.ini opens from the
-      // PHP row: a list you go and work on rather than a state you watch, and one
-      // that does not belong under the two things this pane exists to show.
-      inProcess
-        ? null
-        : button("", () => openServiceSettings(id, refresh), {
-            icon: "lucide:Settings2",
-            title: `Port${isWebServer(id) ? "s and HTTPS" : ""} for ${p?.label ?? id}`,
-          }),
-      inProcess
-        ? null
-        : button("Install", () => p && void openInstaller(p, refresh), {
-            icon: "lucide:Download",
-            disabled: Boolean(busy),
-            spin: busy?.quiet,
-            title: busy?.quiet ? busy.text : "Install another " + (p?.label ?? id) + " version",
-          }),
-      // Beside the viewer, because both answer the same question: show me this
-      // database. It sat in the settings dialog, which is where you go to CHANGE
-      // something rather than to use it.
-      id === "mysql" && phpMyAdminInstalledNow()
-        ? button("phpMyAdmin", () => void openFolder(phpMyAdminUrl()), {
-            icon: "lucide:ExternalLink",
-            title: phpMyAdminUrl(),
-          })
-        : null,
-      // Only the databases SQL Explorer can open, and only when it is installed.
-      // Absent is the honest look for a handover with nowhere to go.
-      VIEWABLE.has(id) && viewerReady()
-        ? button(
-            "Viewer",
-            () => {
-              const why = openViewer();
-              if (why) ctx?.ui.toast(why, { variant: "warning" });
-            },
-            { icon: "lucide:Database", title: "Open this database in SQL Explorer" },
-          )
-        : null,
-      inProcess
-        ? button("Jobs", () => openCron(refresh), {
-            icon: "lucide:CalendarClock",
-            title: "Add, edit and run the scheduled jobs",
-          })
-        : null,
       running
         ? button(
             "Stop",
@@ -753,22 +763,12 @@ function serviceRow(id, refresh) {
               spin: starting,
             },
           ),
-      running
-        ? button(
-            "Restart",
-            async () => {
-              await restart(id);
-              refresh();
-            },
-            // Amber: it stops the thing before it starts it, which is neither of
-            // the other two answers.
-            { variant: "warn", icon: "lucide:RotateCw" },
-          )
-        : null,
+      actionsMenu(/** @type {any} */ (secondary), { title: `More for ${p?.label ?? id}` }),
     ],
   );
 
-  const line = row([left, middle, right]);
+  // The failure sentence goes LAST, on a line of its own under the controls.
+  const line = row([left, middle, right, failed && st?.error ? noteLine(st.error) : null]);
   // Same shape the setup checklist and the runtime rows use: the bar belongs to
   // the row doing the work, so nothing has to say which one it is measuring. A
   // `quiet` step has no transfer behind it and spins the Install icon instead.

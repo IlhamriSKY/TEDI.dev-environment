@@ -26,6 +26,8 @@ import { matches, isValidSchedule, splitCommand } from "./manager/cron.js";
 import { loadModuleLines } from "./web/serverroot.js";
 import { serverPorts, plannedPort, portIsPinned } from "./web/ports.js";
 import { setDirective, getDirective } from "./manager/phpini.js";
+import { poolLauncher } from "./manager/services.js";
+import { dllTarget } from "./manager/phpext.js";
 import { pendingDefaults, SEED_GENERATION } from "./manager/phpext.js";
 import { compareVersions, majorMinor, isPrerelease } from "./registry/util.js";
 import { versionSatisfies } from "./project/resolve.js";
@@ -136,6 +138,19 @@ test("the framework wave carries what Composer and Laravel cannot boot without",
   for (const name of ["openssl", "mbstring", "curl", "fileinfo", "zip"]) {
     assert.ok(pending.includes(name), `a downloaded PHP would ship without ${name}`);
   }
+});
+
+test("the OPcache wave is its own, so an existing environment gets it once", () => {
+  // The measured 4.8x. It is wave three rather than an addition to wave two,
+  // because appending to a wave that has already run means never reaching the
+  // environments that predate it - and re-running that wave would switch back
+  // on whatever the user had switched off.
+  assert.ok(
+    pendingDefaults(2).includes("opcache"),
+    "opcache is not in the pending set at generation 2",
+  );
+  assert.ok(!pendingDefaults(2).includes("openssl"), "generation 2 was offered wave two again");
+  assert.deepEqual(pendingDefaults(SEED_GENERATION), []);
 });
 
 test("an inline comment is not part of the value", () => {
@@ -526,6 +541,41 @@ test("applyRuntimeChange does every consequence, not one", () => {
   for (const step of steps) {
     assert.ok(src.includes(step), `applyRuntimeChange no longer calls ${step}`);
   }
+});
+
+console.log("\ninstalling a PECL archive");
+
+test("the extension DLL goes to ext/, its support libraries go beside the executable", () => {
+  // imagick is the case that made this matter: eight ImageMagick libraries in
+  // the same zip. Windows resolves a module's dependencies from the directory
+  // of the EXECUTABLE, never from the directory of the module, so a support
+  // library left in ext/ is invisible and PHP blames php_imagick.dll instead.
+  assert.equal(dllTarget("php_imagick.dll"), "ext");
+  assert.equal(dllTarget("php_redis.dll"), "ext");
+  assert.equal(dllTarget("CORE_RL_MagickWand_.dll"), "root");
+  assert.equal(dllTarget("IM_MOD_RL_bmp_.dll"), "root");
+  assert.equal(dllTarget("libssh2.dll"), "root");
+});
+
+console.log("\nthe Windows FastCGI launcher");
+
+test("never lets the worker recycle itself", () => {
+  // The whole reason the launcher exists. php-cgi exits after 500 requests by
+  // default and nothing here would start a replacement, so every site on that
+  // PHP version answers 502 from the 500th request on. Measured before the fix
+  // at three concurrencies: dead after 498, 499 and 499 requests.
+  const out = poolLauncher("D:\\DEV ENV\\runtimes\\php\\8.3.33\\php-cgi.exe", 12601);
+  assert.match(out, /set "PHP_FCGI_MAX_REQUESTS=0"/);
+});
+
+test("quotes the interpreter path, which contains a space on a real install", () => {
+  // `D:\DEV ENV\...` is the owner's actual root. Unquoted, cmd runs `D:\DEV`.
+  const out = poolLauncher("D:\\DEV ENV\\runtimes\\php\\8.3.33\\php-cgi.exe", 12601);
+  assert.match(out, /^"D:\\DEV ENV\\[^"]*php-cgi\.exe" -b 127\.0\.0\.1:12601$/m);
+});
+
+test("is CRLF, because a batch file is", () => {
+  assert.ok(poolLauncher("php-cgi.exe", 1).includes("\r\n"), "batch file written with bare LF");
 });
 
 console.log("\nshim scripts (executed, not just generated)");

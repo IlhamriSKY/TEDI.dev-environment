@@ -7,7 +7,19 @@
 // that sometimes takes 200ms and sometimes takes four minutes trains people to
 // be afraid of it.
 
-import { h, row, muted, button, dropdown, section, mark, progress, confirm, status } from "./el.js";
+import {
+  h,
+  row,
+  muted,
+  button,
+  dropdown,
+  section,
+  mark,
+  progress,
+  confirm,
+  status,
+  actionsMenu,
+} from "./el.js";
 import { openPhpConfig } from "./php-view.js";
 import { openPackagers } from "./packagers-view.js";
 import { markFor } from "./marks.js";
@@ -145,41 +157,53 @@ function runtimeRow(p, refresh) {
             },
             { full: true },
           ),
-          configure,
         ]
       : [muted(p.blurb ?? "")],
   );
 
+  // Same shape as a service row: the action you take often stays out here, the
+  // two you take twice a year go behind the menu. Configure moved out of the
+  // middle group so the row reads identity, version, action from left to right
+  // at every width.
   const right = h(
     "div",
     { style: "display:flex;align-items:center;gap:5px;flex:0 1 auto;min-width:0;flex-wrap:wrap" },
     [
-      button("Install", () => void openInstaller(p, refresh), {
-        icon: "lucide:Download",
-        disabled: Boolean(busy),
-        spin: busy?.quiet,
-        title: busy?.quiet ? busy.text : `Install another ${p.label} version`,
-      }),
-      installed.some((v) => v.origin === "download" && v.version === active)
-        ? button(
-            "Remove",
-            async () => {
-              if (!active) return;
-              const ok = await confirm({
-                title: `Remove ${p.label} ${active}?`,
-                description:
-                  `The installed files are deleted. Anything pinned to ${active} falls back to ` +
-                  `the next version, and getting it back is another download.`,
-              });
-              if (!ok) return;
-              await uninstall(p, active);
-              await setActiveVersion(p.id, null);
-              await applyRuntimeChange();
-              refresh();
+      configure,
+      actionsMenu(
+        /** @type {any} */ (
+          [
+            {
+              label: `Install another ${p.label} version`,
+              icon: "lucide:Download",
+              disabled: Boolean(busy),
+              onClick: () => void openInstaller(p, refresh),
             },
-            { variant: "danger", title: `Remove ${p.label} ${active}` },
-          )
-        : null,
+            installed.some((v) => v.origin === "download" && v.version === active)
+              ? {
+                  label: `Remove ${p.label} ${active}`,
+                  icon: "lucide:Trash2",
+                  danger: true,
+                  onClick: async () => {
+                    if (!active) return;
+                    const ok = await confirm({
+                      title: `Remove ${p.label} ${active}?`,
+                      description:
+                        `The installed files are deleted. Anything pinned to ${active} falls back to ` +
+                        `the next version, and getting it back is another download.`,
+                    });
+                    if (!ok) return;
+                    await uninstall(p, active);
+                    await setActiveVersion(p.id, null);
+                    await applyRuntimeChange();
+                    refresh();
+                  },
+                }
+              : null,
+          ].filter(Boolean)
+        ),
+        { title: `More for ${p.label}` },
+      ),
     ],
   );
 

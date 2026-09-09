@@ -99,6 +99,11 @@ function withDefaults(source, installDir) {
     ["max_execution_time", "300"],
     ["display_errors", "On"],
     ["date.timezone", "UTC"],
+    // OPcache is turned on as a default extension (wave three). The stock
+    // revalidation is every 2 seconds, which on a development machine is the
+    // "I saved it and refreshed and nothing changed" bug; 0 checks the file's
+    // timestamp on every request, which is what makes the speed safe to take.
+    ["opcache.revalidate_freq", "0"],
   ])) {
     out = setDirective(out, key, value);
   }

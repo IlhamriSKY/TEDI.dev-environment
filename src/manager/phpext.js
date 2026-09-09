@@ -21,7 +21,7 @@ import { extract } from "../core/archive.js";
 import { paths, join } from "../core/paths.js";
 import { readDir, readText, writeText, mkdirp, remove, exists, move } from "../core/fsx.js";
 import { run } from "../core/proc.js";
-import { isWindows, exeSuffix } from "../runtime.js";
+import { isWindows, exeSuffix, warn } from "../runtime.js";
 import { resolveVersion } from "./versions.js";
 import { majorMinor } from "../registry/util.js";
 import { phpExtDir, supportsRuntimeExtensions } from "../registry/php.js";
@@ -147,22 +147,49 @@ export async function installExtension(name, phpVersion, extVersion) {
     await mkdirp(staging);
     await extract(archive, staging);
 
-    // The zip holds the DLL plus documentation; only DLLs belong in ext/.
+    // The zip holds the DLL plus documentation; only DLLs are installed, and
+    // WHERE each one goes is the difference between a working extension and
+    // the most confusing error message Windows PHP produces. See `dllTarget`.
     const extDir = phpExtDir(phpVersion);
     await mkdirp(extDir);
     let copied = 0;
+    let support = 0;
     for (const entry of await readDir(staging, true)) {
       if (entry.kind !== "file" || !/\.dll$/i.test(entry.name)) continue;
-      await move(join(staging, entry.name), join(extDir, entry.name));
+      const toExt = dllTarget(entry.name) === "ext";
+      await move(join(staging, entry.name), join(toExt ? extDir : row.dir, entry.name));
       copied++;
+      if (!toExt) support++;
     }
     if (copied === 0) throw new Error(`The ${name} archive contained no DLL.`);
+    if (support)
+      warn(`installed ${support} support librar${support === 1 ? "y" : "ies"} for ${name}`);
 
     await enable(name, phpVersion, true);
   } finally {
     await remove(archive).catch(() => {});
     await remove(staging).catch(() => {});
   }
+}
+
+/**
+ * Where one DLL out of a PECL archive has to land.
+ *
+ * `php_something.dll` is the extension itself and belongs in `ext/`. Every
+ * OTHER dll in the archive is a library the extension links against - imagick
+ * ships eight of them, ImageMagick's own - and those have to sit next to the
+ * EXECUTABLE, because that is where Windows looks for a module's dependencies.
+ * The directory of the module doing the loading is not on that search path.
+ *
+ * Getting this wrong is silent in the worst way: PHP reports "Unable to load
+ * dynamic library php_imagick.dll - The specified module could not be found",
+ * naming the file that IS there rather than the library that is missing, and
+ * the extension had put every one of them in `ext/`.
+ *
+ * @param {string} fileName @returns {"ext" | "root"}
+ */
+export function dllTarget(fileName) {
+  return /^php_/i.test(fileName) ? "ext" : "root";
 }
 
 /**
@@ -229,7 +256,12 @@ async function builtinExtensions(version) {
     const line = raw.trim();
     // Section headers ("[PHP Modules]") and blanks are not extensions.
     if (!line || line.startsWith("[")) continue;
-    names.push(line.toLowerCase());
+    // `php -m` prints OPcache as "Zend OPcache", which matches neither the DLL
+    // name nor the ini directive. Left as it is, PHP 8.5 - which compiles
+    // OPcache IN and needs no `zend_extension` line at all - shows a row called
+    // "zend opcache" that no other part of this file can recognise, and the
+    // defaults pass cannot tell it is already built in.
+    names.push(line.toLowerCase() === "zend opcache" ? "opcache" : line.toLowerCase());
   }
   return names;
 }
@@ -256,6 +288,14 @@ async function builtinExtensions(version) {
  * It is still not a general opinion about a good php.ini: it is what the
  * environment has to have for the things it installs to work at all.
  *
+ * Wave three is OPcache, and it is the single largest thing in this extension's
+ * gift. Measured on the same PHP, same application, same machine: 230 ms per
+ * request without it, 47.7 ms with it. Nothing else came close - JIT, a bigger
+ * opcache and a warmed realpath cache were each inside the run-to-run spread,
+ * so none of them is here. `apply.js` pairs it with `revalidate_freq = 0`,
+ * which is what keeps it honest on a development machine: full speed, and a
+ * file you just saved is still read on the very next request.
+ *
  * WAVES, not one list, because seeding is a one-off per wave. An environment
  * that predates a wave gets that wave once; a user who then switches something
  * off has decided. Appending to an existing wave would turn their choice back
@@ -264,6 +304,7 @@ async function builtinExtensions(version) {
 export const DEFAULT_WAVES = [
   ["mysqli", "pdo_mysql", "pgsql", "pdo_pgsql"],
   ["openssl", "mbstring", "curl", "fileinfo", "zip"],
+  ["opcache"],
 ];
 
 /** An environment seeded through this many waves needs nothing doing to it. */
