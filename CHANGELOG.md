@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.1.38
+
+- **The status-bar icon now has one light per service.** It was
+  `lucide:Server`, whose chassis carries two indicators that look drawn to be
+  lit separately and never could be: a host paints a lucide icon in one
+  `currentColor` and masks an SVG into one `background-color`, so four services
+  could only ever be reported as one overall tone. The glyph is now built here,
+  with lucide's chassis copied exactly - the same two 20x8 rounded rects - and
+  its two dots replaced by four at x=6 and its mirror at x=18, which is the
+  same inset from each rack's inner edge. Web server top-left (nginx and Apache
+  share the seat, and a failure wins it over a success), Redis top-right, MySQL
+  bottom-left, PostgreSQL bottom-right. Green for running, red for failed, dim
+  for down. Needs TEDI 0.4.53, which added `StatusItem.iconColored`; the
+  manifest's engine floor now says so, because on an older host the file would
+  be masked and every light would come out the same colour. See
+  [server-icon.js](src/ui/server-icon.js).
+
+- **The lights breathe.** The halo rises and falls over 2.4 seconds while the
+  core stays steady, because a light whose whole body fades out is a light
+  going off and on, which reads as a fault however green it is. The keyframes
+  travel inside the file: it is rendered as an `<img>`, so it is its own
+  document and the app's stylesheet never reaches it - which is also why every
+  colour is read from the live theme tokens and baked in rather than left as a
+  `var()`. Reduced motion turns the animation off; the colour already carries
+  the state.
+
+- **Two comments in `index.js` described a host that had moved on.** They said
+  a `data:` SVG was masked (this code never shipped one, it shipped a lucide
+  name) and that an error drew a red dot beside the icon (the host paints the
+  icon itself red now, and dropped the dot). Both are rewritten to describe
+  what the code does.
+
 ## 0.1.37
 
 - **The new overflow menu was a blank square.** Its button asked for

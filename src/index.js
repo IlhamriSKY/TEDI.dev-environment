@@ -30,6 +30,7 @@ import { writeShims, shimDir } from "./project/shims.js";
 import { migrateLayout, legacyShimDir } from "./manager/migrate.js";
 import { loadJobs } from "./manager/cron.js";
 import { relocateTerminalPath } from "./ui/setup.js";
+import { serverIcon } from "./ui/server-icon.js";
 import { writeGlobalEnv, ensurePhpInis } from "./manager/apply.js";
 import { publishHandoff } from "./manager/handoff.js";
 import { seedDefaults } from "./manager/defaults.js";
@@ -171,19 +172,19 @@ export async function activate(context) {
   /**
    * The status item.
    *
-   * The host paints an extension's status icon in ONE colour and offers three
-   * looks through `tone`: lit (`success`), breathing (`warning`), and a red dot
-   * beside it (`error`). So the two little LEDs on the server glyph cannot be
-   * lit separately however much they look like they were drawn for it - a
-   * `data:` SVG is rendered as a CSS mask, which is a shape painted in a single
-   * `background-color`, and nothing inside it carries its own colour or
-   * animation.
+   * The glyph is `ui/server-icon.js`, not `lucide:Server`, and it carries FOUR
+   * lights - web server, Redis, MySQL, PostgreSQL - each green when that
+   * service is up and red when it failed. That needs `iconColored`, because a
+   * host paints a lucide icon in one `currentColor` and masks an SVG into one
+   * `background-color`; either way four lights would have collapsed into one.
    *
-   * Three looks, so three states worth telling apart - and each has to LAST
-   * long enough to be seen. Breathing was on "starting", which is a few hundred
-   * milliseconds and therefore never on screen; it is on downloading now, which
-   * is minutes. The precedence is what you would want at a glance: something in
-   * flight beats something broken beats something merely up.
+   * `tone` still exists and still matters, because it is what the whole item
+   * says at a glance and what the tooltip and the pulse follow, and because a
+   * seventh service (the scheduler) has no light of its own. Each tone has to
+   * LAST long enough to be seen: breathing was on "starting", which is a few
+   * hundred milliseconds and therefore never on screen; it is on downloading
+   * now, which is minutes. The precedence is what you would want at a glance:
+   * something in flight beats something broken beats something merely up.
    */
   const syncStatus = () => {
     const all = [...state.services.values()];
@@ -207,9 +208,21 @@ export async function activate(context) {
           ? `Dev Environment: ${running.map(label).join(", ")} running`
           : "Dev Environment: nothing running";
 
+    // One seat's light. A failure beats a success rather than the other way
+    // round: the top-left seat covers both web servers, and nginx serving
+    // happily is not the thing you need to be told when Apache just died
+    // trying to take port 80 off it.
+    const lampFor = (/** @type {string[]} */ ids) => {
+      const rows = ids.map((id) => state.services.get(id));
+      if (rows.some((s) => s?.state === "error")) return /** @type {const} */ ("error");
+      if (rows.some((s) => s?.state === "running")) return /** @type {const} */ ("on");
+      return /** @type {const} */ ("off");
+    };
+
     context.statusBar.setItem({
       id: STATUS_ITEM,
-      icon: "lucide:Server",
+      icon: serverIcon(lampFor),
+      iconColored: true,
       tone,
       tooltip,
       onClick: open,

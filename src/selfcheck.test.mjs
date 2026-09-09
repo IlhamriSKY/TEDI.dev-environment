@@ -35,6 +35,7 @@ import { slug, hostname, domainOf } from "./project/projects.js";
 import { fastcgiPort, renderVhost } from "./web/vhost.js";
 import { offeredConnections } from "./manager/handoff.js";
 import { releaseDate } from "./ui/version-picker.js";
+import { serverIcon } from "./ui/server-icon.js";
 
 let passed = 0;
 /** @param {string} name @param {() => void} fn */
@@ -1505,6 +1506,73 @@ test("every offered connection is addressable and prefixed", () => {
 test("nothing is offered when no database is installed", () => {
   state.installed.clear();
   assert.deepEqual(offeredConnections(), []);
+});
+
+console.log("\nthe status-bar lights");
+
+test("each light sits on its own service, in the documented seat", () => {
+  // `serverIcon` reads three theme tokens off the live document. Stub them with
+  // values nothing else could produce, so the assertions below are about WHICH
+  // circle got WHICH colour and not about the shipped palette.
+  const TOKENS = {
+    "--tedi-icon-idle": "#00ff00",
+    "--tedi-icon-blocked": "#ff0000",
+    "--foreground": "#808080",
+  };
+  globalThis.document = /** @type {never} */ ({ body: {} });
+  globalThis.getComputedStyle = /** @type {never} */ (() => ({
+    getPropertyValue: (/** @type {string} */ name) => TOKENS[name] ?? "",
+  }));
+
+  // Redis down, MySQL up, the other two seats dark - one of every state, so a
+  // seat that answers with its neighbour's colour cannot hide behind a case
+  // where they happen to agree.
+  const url = serverIcon((ids) =>
+    ids.includes("redis") ? "error" : ids.includes("mysql") ? "on" : "off",
+  );
+  assert.ok(url.startsWith("data:image/svg+xml,"), "not a data URL the host can render");
+  const svg = decodeURIComponent(url.slice("data:image/svg+xml,".length));
+
+  /** The colour of the CORE circle at one seat (r="1"), not its halo. */
+  const seat = (/** @type {number} */ x, /** @type {number} */ y) =>
+    svg.match(new RegExp(`cx="${x}" cy="${y}" r="1" fill="([^"]+)"`))?.[1];
+
+  assert.equal(seat(6, 6), TOKENS["--foreground"], "top-left is the web server, and it is down");
+  assert.equal(seat(18, 6), TOKENS["--tedi-icon-blocked"], "top-right is Redis, and it failed");
+  assert.equal(seat(6, 18), TOKENS["--tedi-icon-idle"], "bottom-left is MySQL, and it is running");
+  assert.equal(seat(18, 18), TOKENS["--foreground"], "bottom-right is PostgreSQL, and it is down");
+
+  // A light that is out must not glow, or "off" and "on" differ only in hue.
+  assert.equal(svg.match(/filter="url\(#glow\)"/g)?.length, 2, "only the lit seats have a halo");
+
+  // The glow BREATHES, and only the halo does. The keyframes have to travel
+  // inside the file: the host renders this as an `<img>`, so it is its own
+  // document and the app's stylesheet never reaches it.
+  assert.match(svg, /@keyframes b\{/, "the breath was dropped from the markup");
+  assert.match(
+    svg,
+    /prefers-reduced-motion:reduce/,
+    "an always-on animation must answer reduced motion",
+  );
+  assert.equal(
+    svg.match(/class="b"/g)?.length,
+    2,
+    "only the two lit halos breathe - a core that fades is a light going out",
+  );
+
+  // The chassis is lucide's `server`, unchanged. Two rects is what makes this
+  // the same icon it has always been rather than a lookalike.
+  assert.ok(svg.includes('<rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>'));
+  assert.ok(svg.includes('<rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>'));
+});
+
+test("both web servers share the top-left seat, and a failure wins it", () => {
+  // nginx serving is not the thing to report when Apache just died trying to
+  // take the port off it.
+  const lit = (/** @type {(ids: string[]) => "on" | "error" | "off"} */ stateOf) =>
+    decodeURIComponent(serverIcon(stateOf)).match(/cx="6" cy="6" r="1" fill="([^"]+)"/)?.[1];
+  assert.equal(lit((ids) => (ids.includes("apache") ? "error" : "on")), "#ff0000");
+  assert.equal(lit((ids) => (ids.includes("nginx") ? "on" : "off")), "#00ff00");
 });
 
 rmSync(tmp, { recursive: true, force: true });
