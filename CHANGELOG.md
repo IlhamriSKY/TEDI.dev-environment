@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.33
+
+- **The whole environment was invisible to an AI agent.** This extension runs
+  the PHP, Node, MySQL, PostgreSQL, Redis, nginx and Apache the user's sites
+  actually sit on, and the entire agent-facing surface was three palette
+  commands: open the panel, start everything, stop everything. Neither TEDI's
+  own agent nor an outside AI CLI could answer "is MySQL running", let alone
+  start it, pin a project to another PHP, or say why a site was returning 502.
+  Five tools now do: `devenv_status` reads every service, runtime, project and
+  the cron scheduler in ONE call, and `devenv_service`, `devenv_project`,
+  `devenv_runtime` and `devenv_cron` change them. Each one is a thin wrapper
+  over the function the dashboard itself calls, because the sequencing around
+  them is load-bearing: `updateProject` re-emits the runtime file that makes a
+  version pin reach a terminal, `republish` regenerates the vhosts and
+  certificates without which a new project is served by nothing, and `saveJob`
+  claims the minute in progress so a job added at 11:07:30 first fires at
+  11:08. Everything that changes the machine raises an approval card; the two
+  reads do not, because an agent has to be able to look before it asks.
+
 ## 0.1.32
 
 - **A domain suffix could become a path, or a server directive.** Everything

@@ -34,6 +34,7 @@ import { writeGlobalEnv, ensurePhpInis } from "./manager/apply.js";
 import { publishHandoff } from "./manager/handoff.js";
 import { seedDefaults } from "./manager/defaults.js";
 import { mountDashboard } from "./ui/dashboard.js";
+import { registerAiTools } from "./ai.js";
 import { clearIconCache } from "./ui/el.js";
 
 /** @typedef {import("../tedi").ExtensionContext} ExtensionContext */
@@ -160,6 +161,12 @@ export async function activate(context) {
   context.registerCommandHandler("tedi.devenv.open", open);
   context.registerCommandHandler("tedi.devenv.startAll", () => void startAll());
   context.registerCommandHandler("tedi.devenv.stopAll", () => void stopAll());
+
+  // From activate(), never the manifest: the host reads AI tools out of the
+  // RUNTIME registry, so a tool declared in `contributes` would be advertised
+  // with no handler behind it. After the config and project loads above, because
+  // `devenv_status` answers out of that state.
+  registerAiTools();
 
   /**
    * The status item.
