@@ -90,7 +90,7 @@ export function servicesView(refresh) {
   // section and nothing else, and a header button that starts five processes
   // two sections away is a button whose effect you have to remember rather than
   // see.
-  const aside = h("div", { style: "display:flex;align-items:center;gap:6px" }, [
+  const aside = h("div", { style: "display:flex;align-items:center;flex-wrap:wrap;gap:6px" }, [
     muted(pools.length ? `PHP FastCGI: ${pools.join(", ")}` : "No PHP worker running"),
     button(
       "Start all",
@@ -616,7 +616,7 @@ function serviceRow(id, refresh) {
 
   const left = h(
     "div",
-    { style: "display:flex;align-items:center;gap:8px;min-width:170px;flex:none" },
+    { style: "display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:min(170px,100%)" },
     [
       // One tick per row, meaning the same thing everywhere: this is what
       // "Start all" brings up. On a web server it is exclusive, because the
@@ -646,7 +646,7 @@ function serviceRow(id, refresh) {
 
   const middle = h(
     "div",
-    { style: "display:flex;align-items:center;gap:6px;flex:1;min-width:0;flex-wrap:wrap" },
+    { style: "display:flex;align-items:center;gap:6px;flex:1 1 auto;min-width:0;flex-wrap:wrap" },
     [
       // Every service is a versioned download like PHP and Node, so it gets the
       // same control: switch what is installed, install another. Only the
@@ -682,87 +682,91 @@ function serviceRow(id, refresh) {
   // Stop stays Stop while a version list is being fetched: the two have
   // nothing to do with each other, and greying it out said otherwise.
   const disabled = !present || Boolean(loud);
-  const right = h("div", { style: "display:flex;align-items:center;gap:5px;flex:none" }, [
-    // The scheduler's contents open FROM its row, like php.ini opens from the
-    // PHP row: a list you go and work on rather than a state you watch, and one
-    // that does not belong under the two things this pane exists to show.
-    inProcess
-      ? null
-      : button("", () => openServiceSettings(id, refresh), {
-          icon: "lucide:Settings2",
-          title: `Port${isWebServer(id) ? "s and HTTPS" : ""} for ${p?.label ?? id}`,
-        }),
-    inProcess
-      ? null
-      : button("Install", () => p && void openInstaller(p, refresh), {
-          icon: "lucide:Download",
-          disabled: Boolean(busy),
-          spin: busy?.quiet,
-          title: busy?.quiet ? busy.text : "Install another " + (p?.label ?? id) + " version",
-        }),
-    // Beside the viewer, because both answer the same question: show me this
-    // database. It sat in the settings dialog, which is where you go to CHANGE
-    // something rather than to use it.
-    id === "mysql" && phpMyAdminInstalledNow()
-      ? button("phpMyAdmin", () => void openFolder(phpMyAdminUrl()), {
-          icon: "lucide:ExternalLink",
-          title: phpMyAdminUrl(),
-        })
-      : null,
-    // Only the databases SQL Explorer can open, and only when it is installed.
-    // Absent is the honest look for a handover with nowhere to go.
-    VIEWABLE.has(id) && viewerReady()
-      ? button(
-          "Viewer",
-          () => {
-            const why = openViewer();
-            if (why) ctx?.ui.toast(why, { variant: "warning" });
-          },
-          { icon: "lucide:Database", title: "Open this database in SQL Explorer" },
-        )
-      : null,
-    inProcess
-      ? button("Jobs", () => openCron(refresh), {
-          icon: "lucide:CalendarClock",
-          title: "Add, edit and run the scheduled jobs",
-        })
-      : null,
-    running
-      ? button(
-          "Stop",
-          async () => {
-            await stop(id);
-            refresh();
-          },
-          { variant: "danger", icon: "lucide:Square" },
-        )
-      : button(
-          "Start",
-          async () => {
-            const s = await start(id);
-            if (s.state === "error" && s.error) ctx?.ui.toast(s.error, { variant: "error" });
-            refresh();
-          },
-          {
-            variant: "success",
-            icon: "lucide:Play",
-            disabled: disabled || starting,
-            spin: starting,
-          },
-        ),
-    running
-      ? button(
-          "Restart",
-          async () => {
-            await restart(id);
-            refresh();
-          },
-          // Amber: it stops the thing before it starts it, which is neither of
-          // the other two answers.
-          { variant: "warn", icon: "lucide:RotateCw" },
-        )
-      : null,
-  ]);
+  const right = h(
+    "div",
+    { style: "display:flex;align-items:center;gap:5px;flex:0 1 auto;min-width:0;flex-wrap:wrap" },
+    [
+      // The scheduler's contents open FROM its row, like php.ini opens from the
+      // PHP row: a list you go and work on rather than a state you watch, and one
+      // that does not belong under the two things this pane exists to show.
+      inProcess
+        ? null
+        : button("", () => openServiceSettings(id, refresh), {
+            icon: "lucide:Settings2",
+            title: `Port${isWebServer(id) ? "s and HTTPS" : ""} for ${p?.label ?? id}`,
+          }),
+      inProcess
+        ? null
+        : button("Install", () => p && void openInstaller(p, refresh), {
+            icon: "lucide:Download",
+            disabled: Boolean(busy),
+            spin: busy?.quiet,
+            title: busy?.quiet ? busy.text : "Install another " + (p?.label ?? id) + " version",
+          }),
+      // Beside the viewer, because both answer the same question: show me this
+      // database. It sat in the settings dialog, which is where you go to CHANGE
+      // something rather than to use it.
+      id === "mysql" && phpMyAdminInstalledNow()
+        ? button("phpMyAdmin", () => void openFolder(phpMyAdminUrl()), {
+            icon: "lucide:ExternalLink",
+            title: phpMyAdminUrl(),
+          })
+        : null,
+      // Only the databases SQL Explorer can open, and only when it is installed.
+      // Absent is the honest look for a handover with nowhere to go.
+      VIEWABLE.has(id) && viewerReady()
+        ? button(
+            "Viewer",
+            () => {
+              const why = openViewer();
+              if (why) ctx?.ui.toast(why, { variant: "warning" });
+            },
+            { icon: "lucide:Database", title: "Open this database in SQL Explorer" },
+          )
+        : null,
+      inProcess
+        ? button("Jobs", () => openCron(refresh), {
+            icon: "lucide:CalendarClock",
+            title: "Add, edit and run the scheduled jobs",
+          })
+        : null,
+      running
+        ? button(
+            "Stop",
+            async () => {
+              await stop(id);
+              refresh();
+            },
+            { variant: "danger", icon: "lucide:Square" },
+          )
+        : button(
+            "Start",
+            async () => {
+              const s = await start(id);
+              if (s.state === "error" && s.error) ctx?.ui.toast(s.error, { variant: "error" });
+              refresh();
+            },
+            {
+              variant: "success",
+              icon: "lucide:Play",
+              disabled: disabled || starting,
+              spin: starting,
+            },
+          ),
+      running
+        ? button(
+            "Restart",
+            async () => {
+              await restart(id);
+              refresh();
+            },
+            // Amber: it stops the thing before it starts it, which is neither of
+            // the other two answers.
+            { variant: "warn", icon: "lucide:RotateCw" },
+          )
+        : null,
+    ],
+  );
 
   const line = row([left, middle, right]);
   // Same shape the setup checklist and the runtime rows use: the bar belongs to

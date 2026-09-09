@@ -192,13 +192,15 @@ function setupCard(steps, blocked) {
  */
 function stepRow(step) {
   const line = row([
-    status(step.working ? "working" : step.note ? "warn" : step.done ? "ok" : "idle"),
-    icon(step.icon, step.done ? "var(--primary)" : "var(--muted-foreground)"),
-    h("div", { style: "display:flex;flex-direction:column;gap:1px;flex:1;min-width:0" }, [
-      h("span", { style: "display:flex;align-items:center;gap:6px" }, [
-        h("span", { text: step.title, style: "font-size:12px;font-weight:600" }),
+    h("div", { style: "display:flex;align-items:center;gap:10px;flex:1 1 auto;min-width:0" }, [
+      status(step.working ? "working" : step.note ? "warn" : step.done ? "ok" : "idle"),
+      icon(step.icon, step.done ? "var(--primary)" : "var(--muted-foreground)"),
+      h("div", { style: "display:flex;flex-direction:column;gap:1px;flex:1;min-width:0" }, [
+        h("span", { style: "display:flex;align-items:center;gap:6px" }, [
+          h("span", { text: step.title, style: "font-size:12px;font-weight:600" }),
+        ]),
+        muted(step.detail),
       ]),
-      muted(step.detail),
     ]),
     step.tag ?? null,
     step.aside ?? null,
@@ -229,7 +231,10 @@ function stepRow(step) {
 function header(ready, refresh) {
   return h(
     "div",
-    { style: "display:flex;align-items:center;justify-content:space-between;gap:10px" },
+    {
+      style:
+        "display:flex;align-items:center;flex-wrap:wrap;justify-content:space-between;gap:10px",
+    },
     [
       h("div", { style: "display:flex;flex-direction:column;gap:1px" }, [
         h("strong", { text: "Dev Environment", style: "font-size:13.5px" }),
@@ -371,7 +376,7 @@ async function setupSteps(refresh) {
           ? `${paths.root()} could not be created. Pick another folder.`
           : "One folder for the runtimes, www (your projects), databases and certificates, so the root is the whole environment and there is one path to back up or move.",
       tag: chosen ? pill(paths.root()) : undefined,
-      aside: h("div", { style: "display:flex;gap:5px" }, [
+      aside: h("div", { style: "display:flex;flex-wrap:wrap;gap:5px" }, [
         chosen
           ? button("Open", () => openFolder(paths.root()), {
               icon: "lucide:FolderOpen",
@@ -451,7 +456,7 @@ async function setupSteps(refresh) {
       tag: pill(shims),
       aside: onPath
         ? undefined
-        : h("div", { style: "display:flex;gap:5px" }, [
+        : h("div", { style: "display:flex;flex-wrap:wrap;gap:5px" }, [
             canRegisterPath()
               ? button("Register", () => void registerPath(refresh), {
                   icon: "lucide:PlugZap",

@@ -19,7 +19,7 @@ import { plan } from "./core/archive.js";
 import { setCtx, setConfig, state } from "./runtime.js";
 import { startsWithAll } from "./manager/config.js";
 import { parseNetstat, parseTasklist, parseLsof, parseSs } from "./web/portowner.js";
-import { parseAccounts, sqlString, posixPath } from "./manager/mysqlusers.js";
+import { parseAccounts, sqlString, sqlArgs } from "./manager/mysqlusers.js";
 import { phpSatisfies } from "./tools/phpmyadmin.js";
 import { parseLoungeIndex } from "./registry/servers.js";
 import { matches, isValidSchedule, splitCommand } from "./manager/cron.js";
@@ -29,7 +29,7 @@ import { setDirective, getDirective } from "./manager/phpini.js";
 import { compareVersions, majorMinor, isPrerelease } from "./registry/util.js";
 import { versionSatisfies } from "./project/resolve.js";
 import { slug } from "./project/projects.js";
-import { fastcgiPort } from "./web/vhost.js";
+import { fastcgiPort, renderVhost } from "./web/vhost.js";
 import { offeredConnections } from "./manager/handoff.js";
 import { releaseDate } from "./ui/version-picker.js";
 
@@ -606,6 +606,54 @@ test("every Remove asks first", () => {
   }
 });
 
+console.log("\nhttp does not serve a second, insecure copy");
+
+// The report was "the browser still says not secure even though it is https",
+// and the certificate was fine the whole time: valid, in date, the right SAN,
+// issued by a CA the machine trusts, and a real browser called the https page
+// `secure`. What was NOT fine is that port 80 served the identical site with
+// nothing pointing at the https one, so every address typed without a scheme
+// landed on the insecure copy of a site that had a working certificate.
+for (const server of ["nginx", "apache"]) {
+  const input = {
+    project: { id: "p", name: "shop", kind: "php", enabled: true },
+    domain: "shop.test",
+    root: "/srv/shop",
+    runtime: { php: "8.3.33" },
+    server,
+    ports: { http: 80, https: 443 },
+  };
+  const cert = { cert: "/c/shop.pem", key: "/c/shop-key.pem" };
+  /** Everything before the https block starts. */
+  const httpPart = (out) => out.slice(0, out.indexOf("443"));
+
+  test(`${server}: with a certificate, http redirects instead of serving`, () => {
+    const http = httpPart(renderVhost({ ...input, cert }));
+    assert.match(http, /302/, "the http block must redirect");
+    // TEMPORARY. A 301 is cached until the user clears it by hand, so turning
+    // HTTPS off would leave every browser that had visited bouncing to a port
+    // that no longer answers, with nothing here able to undo it.
+    assert.ok(!/\b301\b/.test(http), "a permanent redirect cannot be undone from here");
+    assert.ok(!http.includes("/srv/shop"), "the http block must not still serve the files");
+    // The name the client asked for, so `www.` survives the bounce.
+    assert.match(http, server === "nginx" ? /\$host/ : /%\{SERVER_NAME\}/);
+  });
+
+  test(`${server}: with no certificate, http still serves`, () => {
+    const out = renderVhost({ ...input, cert: null });
+    assert.ok(out.includes("/srv/shop"), "http is the only thing serving when https is off");
+    assert.ok(!/\b30[12]\b/.test(out), "there is nothing to redirect to");
+  });
+
+  test(`${server}: a moved https port is named once, and without the http port`, () => {
+    const out = renderVhost({ ...input, cert, ports: { http: 8080, https: 8443 } });
+    assert.match(out.slice(0, out.indexOf("8443", out.indexOf("8443") + 1)), /:8443/);
+    // `%{HTTP_HOST}` carries the port the client typed, which turned a moved
+    // http port into `https://shop.test:8080:8443/`.
+    assert.ok(!/:8080:8443/.test(out), "the http port must not survive into the target");
+  });
+}
+
 console.log("\nwhat gets a vhost");
 
 // The one that took an evening. `publish` served the user's projects PLUS the
@@ -786,20 +834,25 @@ test("account rows survive the client's batch output", () => {
   assert.deepEqual(parseAccounts(""), []);
 });
 
-test("the path handed to `source` is one the client will read", () => {
-  // The bug: `source D:\DEV ENV\...` is handed to the mysql client's OWN
-  // backslash-command parser, which reads `\D` as an unknown command and
-  // refuses the whole statement with "Unknown command '\D'" - a message that
-  // names nothing the user typed and nothing they can act on.
-  const BS = String.fromCharCode(92);
-  const win = ["D:", "DEV ENV", "internal", "run", "accounts-1.sql"].join(BS);
-  const out = posixPath(win);
-  assert.ok(!out.includes(BS), "a backslash left in the path is read as a client command");
-  assert.equal(out, "D:/DEV ENV/internal/run/accounts-1.sql");
-  // `source` takes the rest of the line as the filename, so the space is fine
-  // and must not be mangled in the name of safety.
-  assert.ok(out.includes("DEV ENV"), "the space was lost");
-  assert.equal(posixPath("/already/posix"), "/already/posix");
+test("the SQL goes to the server, not to the client's `source` command", () => {
+  // The bug this replaces: the SQL was written to a file and run as
+  // `--execute "source <path>"`. `source` is a command of the mysql CLIENT and
+  // is only honoured while it reads a terminal or a pipe; under `--execute` the
+  // whole line goes to the server, which answers
+  // `ERROR 1064 ... near 'source D:/DEV ENV/...'` and every account action
+  // fails. Its short form `\\.` is refused as an unknown command, and
+  // `--named-commands` does not help - there is no argv-only way to make this
+  // client read a file.
+  const sql = "CREATE USER 'app'@'localhost' IDENTIFIED BY 'pw';";
+  const args = sqlArgs(3306, sql);
+  assert.equal(args[args.indexOf("--execute") + 1], sql, "the SQL must be the argument itself");
+  assert.ok(
+    !args.some((a) => /^source /.test(a) || a === "\\."),
+    "a client command is not SQL and the server will reject it",
+  );
+  // A path would mean the file is back. Nothing here may look like one.
+  assert.ok(!args.some((a) => /[.]sql$/.test(a)));
+  assert.ok(args.includes("--port=3306") && args.includes("--user=root"));
 });
 
 test("a password cannot end its own SQL string", () => {

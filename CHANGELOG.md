@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.1.31
+
+- **Every MySQL account action failed with a SQL syntax error.** Creating an
+  account, changing its password and dropping one all reported
+  `ERROR 1064 (42000) at line 1 ... near 'source D:/DEV ENV/internal/run/
+accounts-<n>.sql'`. The SQL was written to a file and the file was run with
+  `--execute "source <path>"`, and `source` is a command of the mysql CLIENT,
+  not SQL: the client honours it only while reading a terminal or a pipe, and
+  under `--execute` it forwards the whole line to the server, which of course
+  cannot parse it. Checked against the shipped client rather than guessed: its
+  short form is refused outright, `--named-commands` changes nothing, and a
+  Windows path additionally trips the client's own backslash scanner. The SQL
+  is passed straight to the client now, which is also what removes the
+  temporary file, the cleanup around it, and the window where a file with a
+  password in it existed on disk. The file was there to keep that password out
+  of the process list, and it was worth nothing on a server initialised
+  `--initialize-insecure`: `root` has no password at all, so anyone who can
+  read the process list can simply connect as root.
+
+- **A site with HTTPS on was also served, unredirected, over plain http.** So
+  the address bar said "Not secure" on a site whose certificate was present,
+  valid, correctly named and trusted, and re-trusting the local certificate
+  authority could never fix it: the page being complained about was the http
+  copy, not the https one. Port 80 now redirects to https for any site that has
+  a certificate, keeping the hostname the visitor typed and the path and query
+  they asked for, so an address entered without a scheme, an old bookmark and a
+  plain link all end up on the secure copy. It is a temporary redirect on
+  purpose: a permanent one is cached until the visitor clears it by hand, and
+  turning HTTPS back off would then leave every browser that had visited
+  bouncing to a port that no longer answers. With HTTPS off nothing changes and
+  port 80 serves the site as before.
+
+- **The panel fits the space it is given.** Every row was laid out as three
+  columns that could not give: a fixed identity column, the version controls,
+  and a button group that kept its full width whatever happened. In a full-width
+  tab that is exactly right, and it was the only place it was ever seen. Put the
+  same panel in a canvas window, a split, or a narrow side pane and the row ran
+  off the edge - a project row wants around 850px and got 420, so the buttons
+  that Enable and Remove it sat past the right edge behind a horizontal
+  scrollbar. Rows now wrap: the identity stays on the first line, the version
+  controls and the buttons drop underneath as the space runs out, and the pane
+  reads the same at 260px as it does at 1200. Nothing moves at the width it was
+  designed for.
+
+- **A setup step no longer leaves its state behind.** The status glyph, the icon
+  and the words were three separate items on the row, so the moment the row
+  wrapped the two 13px glyphs fitted on a line the sentence beside them did not,
+  and the tick that says whether the step is done ended up stranded above the
+  title it describes. They are one block now, the way every other row in the
+  panel is built.
+
 ## 0.1.30
 
 - **"Stop all" left one service running and said it had not.** It picked the

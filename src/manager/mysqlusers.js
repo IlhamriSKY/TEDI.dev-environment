@@ -8,13 +8,29 @@
 //
 // Everything here goes through the `mysql` client that ships beside `mysqld`,
 // because the alternative is a MySQL protocol implementation and this is a
-// version manager. The SQL is written to a FILE rather than passed with `-e`:
-// `CREATE USER ... IDENTIFIED BY '<password>'` on a command line is visible in
-// the process list to every other user on the machine for as long as it runs.
+// version manager. The SQL is passed with `--execute`, and there is a real
+// argument against that which does not survive contact with this particular
+// server: `CREATE USER ... IDENTIFIED BY '<password>'` is visible in the
+// process list while it runs. The managed MySQL is initialised
+// `--initialize-insecure`, so `root` has NO password at all, and anybody who
+// can read that process list can simply connect as root and read every
+// password hash there is. Hiding one statement from them buys nothing.
+//
+// It bought less than nothing. The SQL used to be written to a file and run
+// with `--execute "source <path>"`, and `source` is a command of the mysql
+// CLIENT, not SQL: the client only honours it while reading a terminal or a
+// pipe. Under `--execute` it is forwarded to the server verbatim, which
+// answers `ERROR 1064 ... near 'source D:/DEV ENV/...'`, so every account
+// action failed. Verified against the shipped client, 26.7.0: `\\.` (its short
+// form) is refused outright with "Unknown command '\\.'", `--named-commands`
+// changes neither, and a Windows path additionally trips the client's own
+// backslash scanner ("Unknown command '\\D'"). There is no argv-only way to
+// make this client read a file - feeding it one needs stdin, which
+// `shell_bg_spawn_direct` does not offer. So the file is gone rather than
+// worked around.
 
 import { run } from "../core/proc.js";
-import { writeText, remove } from "../core/fsx.js";
-import { paths, join } from "../core/paths.js";
+import { join } from "../core/paths.js";
 import { resolveVersion } from "./versions.js";
 import { activeVersion } from "./config.js";
 import { plannedPort } from "../web/ports.js";
@@ -54,20 +70,35 @@ export function sqlString(value) {
   return `'${String(value).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 }
 
-/** A path the `mysql` client will read as a path. Exported for the
- *  self-check: the failure is an error message about a command nobody typed.
- *  @param {string} path @returns {string} */
-export function posixPath(path) {
-  return String(path).split(String.fromCharCode(92)).join("/");
+/**
+ * The client arguments for one batch of SQL.
+ *
+ * Exported for the self-check, which exists for one reason: to fail if this is
+ * ever routed back through the client's `source` command. See the note at the
+ * top of this file for what that cost.
+ *
+ * `--batch --skip-column-names` makes the output tab-separated rows with no
+ * decoration, which is what `parseAccounts` reads.
+ *
+ * @param {number} port @param {string} sql @returns {string[]}
+ */
+export function sqlArgs(port, sql) {
+  return [
+    "--user=root",
+    "--host=127.0.0.1",
+    `--port=${port}`,
+    "--batch",
+    "--skip-column-names",
+    "--execute",
+    sql,
+  ];
 }
 
 /**
  * Run SQL as root and return stdout.
  *
- * `--batch --skip-column-names` makes the output tab-separated rows with no
- * decoration, which is what `parseAccounts` reads. The script file lives in the
- * run directory and is removed either way: it can hold a password, and a
- * failure is exactly when a leftover copy would sit around longest.
+ * Several statements at once are fine: the client splits `--execute` on `;`
+ * itself, so a create-and-grant is one connection rather than two.
  *
  * @param {string} sql
  * @returns {Promise<{ ok: boolean, out: string }>}
@@ -78,34 +109,8 @@ async function runSql(sql) {
   if (state.services.get("mysql")?.state !== "running") {
     return { ok: false, out: "MySQL is not running." };
   }
-
-  const file = join(paths.run(), `accounts-${Date.now()}.sql`);
-  // FORWARD slashes, even on Windows. `source` hands the rest of the line to
-  // the client's OWN backslash-command parser, so a Windows path is read as
-  // the unknown command `\D` and the statement is refused with
-  // "Unknown command '\D'" - which names nothing a user could act on. The
-  // client accepts `/` on every platform and takes the rest of the line as the
-  // filename, so a space in the path is still fine.
-  const sourcePath = posixPath(file);
-  try {
-    await writeText(file, `${sql}\n`);
-    const res = await run(
-      exe,
-      [
-        "--user=root",
-        "--host=127.0.0.1",
-        `--port=${plannedPort("mysql")}`,
-        "--batch",
-        "--skip-column-names",
-        "--execute",
-        `source ${sourcePath}`,
-      ],
-      { timeoutMs: 30_000 },
-    );
-    return { ok: res.code === 0, out: res.out };
-  } finally {
-    await remove(file).catch(() => {});
-  }
+  const res = await run(exe, sqlArgs(plannedPort("mysql"), sql), { timeoutMs: 30_000 });
+  return { ok: res.code === 0, out: res.out };
 }
 
 /**

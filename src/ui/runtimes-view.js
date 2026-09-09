@@ -84,7 +84,7 @@ function runtimeRow(p, refresh) {
 
   const left = h(
     "div",
-    { style: "display:flex;align-items:center;gap:8px;min-width:170px;flex:none" },
+    { style: "display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:min(170px,100%)" },
     [
       mark(logo),
       h("div", { style: "display:flex;flex-direction:column;gap:0;min-width:0" }, [
@@ -126,7 +126,7 @@ function runtimeRow(p, refresh) {
 
   const middle = h(
     "div",
-    { style: "display:flex;align-items:center;gap:6px;flex:1;min-width:0" },
+    { style: "display:flex;align-items:center;gap:6px;flex:1 1 auto;min-width:0;flex-wrap:wrap" },
     installed.length
       ? [
           dropdown(
@@ -150,34 +150,38 @@ function runtimeRow(p, refresh) {
       : [muted(p.blurb ?? "")],
   );
 
-  const right = h("div", { style: "display:flex;align-items:center;gap:5px;flex:none" }, [
-    button("Install", () => void openInstaller(p, refresh), {
-      icon: "lucide:Download",
-      disabled: Boolean(busy),
-      spin: busy?.quiet,
-      title: busy?.quiet ? busy.text : `Install another ${p.label} version`,
-    }),
-    installed.some((v) => v.origin === "download" && v.version === active)
-      ? button(
-          "Remove",
-          async () => {
-            if (!active) return;
-            const ok = await confirm({
-              title: `Remove ${p.label} ${active}?`,
-              description:
-                `The installed files are deleted. Anything pinned to ${active} falls back to ` +
-                `the next version, and getting it back is another download.`,
-            });
-            if (!ok) return;
-            await uninstall(p, active);
-            await setActiveVersion(p.id, null);
-            await applyRuntimeChange();
-            refresh();
-          },
-          { variant: "danger", title: `Remove ${p.label} ${active}` },
-        )
-      : null,
-  ]);
+  const right = h(
+    "div",
+    { style: "display:flex;align-items:center;gap:5px;flex:0 1 auto;min-width:0;flex-wrap:wrap" },
+    [
+      button("Install", () => void openInstaller(p, refresh), {
+        icon: "lucide:Download",
+        disabled: Boolean(busy),
+        spin: busy?.quiet,
+        title: busy?.quiet ? busy.text : `Install another ${p.label} version`,
+      }),
+      installed.some((v) => v.origin === "download" && v.version === active)
+        ? button(
+            "Remove",
+            async () => {
+              if (!active) return;
+              const ok = await confirm({
+                title: `Remove ${p.label} ${active}?`,
+                description:
+                  `The installed files are deleted. Anything pinned to ${active} falls back to ` +
+                  `the next version, and getting it back is another download.`,
+              });
+              if (!ok) return;
+              await uninstall(p, active);
+              await setActiveVersion(p.id, null);
+              await applyRuntimeChange();
+              refresh();
+            },
+            { variant: "danger", title: `Remove ${p.label} ${active}` },
+          )
+        : null,
+    ],
+  );
 
   const line = row([left, middle, right]);
   // Same shape the setup checklist uses: the bar belongs to the row doing the

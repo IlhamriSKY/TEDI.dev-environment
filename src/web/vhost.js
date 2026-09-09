@@ -185,6 +185,17 @@ function logFile(domain, server, kind) {
   return conf(join(paths.logs(), `${domain}.${server}.${kind}.log`));
 }
 
+/**
+ * Render one server's vhost. Exported for the self-check: everything it needs
+ * is passed in, so a check can render a site with and without a certificate and
+ * read what each one actually says.
+ *
+ * @param {VhostInput} input @returns {string}
+ */
+export function renderVhost(input) {
+  return input.server === "nginx" ? nginxVhost(input) : apacheVhost(input);
+}
+
 /** @param {VhostInput} input @returns {string} */
 function nginxVhost({ project, domain, root, runtime, cert, server, ports }) {
   const php = runtime.php ? fastcgiPort(runtime.php) : null;
@@ -239,13 +250,23 @@ function nginxVhost({ project, domain, root, runtime, cert, server, ports }) {
     ...location,
   ];
 
-  const blocks = [
-    "server {",
-    `    listen ${ports.http};`,
-    ...(cert ? [`    listen [::]:${ports.http};`] : []),
-    ...common,
-    "}",
-  ];
+  // With HTTPS on, port 80 REDIRECTS rather than serving a second copy of the
+  // same site. See `httpsRedirect` for why.
+  const blocks = cert
+    ? [
+        "server {",
+        `    listen ${ports.http};`,
+        `    listen [::]:${ports.http};`,
+        `    server_name ${domain} www.${domain};`,
+        `    access_log "${logFile(domain, server, "access")}";`,
+        `    error_log "${logFile(domain, server, "error")}";`,
+        "",
+        // `$host` is the name the client asked for with the port stripped, so
+        // `www.` survives and the https port is added exactly once.
+        `    return 302 https://$host${httpsSuffix(ports)}$request_uri;`,
+        "}",
+      ]
+    : ["server {", `    listen ${ports.http};`, ...common, "}"];
 
   if (cert) {
     blocks.push(
@@ -316,7 +337,23 @@ function apacheVhost({ project, domain, root, runtime, cert, server, ports }) {
     );
   }
 
-  const blocks = [`<VirtualHost *:${ports.http}>`, ...body, "</VirtualHost>"];
+  const blocks = cert
+    ? [
+        `<VirtualHost *:${ports.http}>`,
+        `    ServerName ${domain}`,
+        `    ServerAlias www.${domain}`,
+        `    ErrorLog "${logFile(domain, server, "error")}"`,
+        `    CustomLog "${logFile(domain, server, "access")}" common`,
+        "",
+        "    RewriteEngine On",
+        // `%{SERVER_NAME}` and not `%{HTTP_HOST}`: with the default
+        // `UseCanonicalName Off` it is the name the client asked for, WITHOUT
+        // the port. `HTTP_HOST` carries the port the client typed, so a
+        // non-default http port produced `https://site.test:8080:8443/`.
+        `    RewriteRule ^/?(.*)$ https://%{SERVER_NAME}${httpsSuffix(ports)}/$1 [R=302,L,QSA]`,
+        "</VirtualHost>",
+      ]
+    : [`<VirtualHost *:${ports.http}>`, ...body, "</VirtualHost>"];
 
   if (cert) {
     blocks.push(
@@ -332,6 +369,34 @@ function apacheVhost({ project, domain, root, runtime, cert, server, ports }) {
   }
 
   return header(domain) + blocks.join("\n") + "\n";
+}
+
+/**
+ * Why port 80 redirects instead of serving.
+ *
+ * A site with HTTPS on was served TWICE, identically, on http and on https, and
+ * nothing sent anyone to the second one. Every address typed without a scheme,
+ * every old bookmark and every plain link therefore landed on the http copy,
+ * where the browser says "Not secure" in the address bar - on a site whose
+ * certificate is present, valid and trusted. The certificate was never the
+ * problem and no amount of re-trusting the local CA fixed it, because the page
+ * being complained about was not the one using it.
+ *
+ * **302, deliberately, not 301.** A permanent redirect is cached by the browser
+ * until its user clears it by hand, so turning HTTPS back off for a project
+ * would leave every browser that had visited it bouncing to a port that no
+ * longer answers, with nothing in this app able to undo it. A temporary
+ * redirect costs one request and is reversible, which is the right trade for a
+ * setting sitting behind a toggle.
+ *
+ * With HTTPS off there is no certificate and no redirect: port 80 serves the
+ * site, exactly as before.
+ *
+ * @param {{ http: number, https: number }} ports
+ * @returns {string} `""` when https is on 443, else `":<port>"`.
+ */
+function httpsSuffix(ports) {
+  return ports.https === 443 ? "" : `:${ports.https}`;
 }
 
 /** @param {string} domain @returns {string} */

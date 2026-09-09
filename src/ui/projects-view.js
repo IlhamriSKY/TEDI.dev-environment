@@ -52,7 +52,7 @@ export async function projectsView(refresh) {
     rows.push(await projectRow(project, refresh));
   }
 
-  const aside = h("div", { style: "display:flex;gap:5px;align-items:center" }, [
+  const aside = h("div", { style: "display:flex;flex-wrap:wrap;gap:5px;align-items:center" }, [
     button(
       "Open www",
       async () => {
@@ -111,7 +111,7 @@ async function projectRow(project, refresh) {
 
   const left = h(
     "div",
-    { style: "display:flex;align-items:center;gap:8px;min-width:190px;flex:none" },
+    { style: "display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:min(190px,100%)" },
     [
       icon("lucide:Folder", enabled ? "var(--primary)" : "var(--muted-foreground)"),
       h("div", { style: "display:flex;flex-direction:column;gap:0;min-width:0" }, [
@@ -139,7 +139,7 @@ async function projectRow(project, refresh) {
 
   const middle = h(
     "div",
-    { style: "display:flex;align-items:center;gap:5px;flex:1;min-width:0;flex-wrap:wrap" },
+    { style: "display:flex;align-items:center;gap:5px;flex:1 1 auto;min-width:0;flex-wrap:wrap" },
     [
       versionPicker("php", project, resolved.php, resolved.sources.php, refresh),
       versionPicker("node", project, resolved.node, resolved.sources.node, refresh),
@@ -148,58 +148,62 @@ async function projectRow(project, refresh) {
     ],
   );
 
-  const right = h("div", { style: "display:flex;align-items:center;gap:5px;flex:none" }, [
-    // The URL above IS a link, and inside the app a link is a small target that
-    // has to be aimed at. This is the same destination as a button, next to the
-    // one that opens the folder, so "show me this project" is one shape whether
-    // you mean the files or the site.
-    button("Browser", () => openFolder(url), {
-      icon: "lucide:ExternalLink",
-      title: `Open ${url} in your browser`,
-      disabled: !enabled,
-    }),
-    button("Folder", () => openFolder(project.path), {
-      icon: "lucide:FolderOpen",
-      title: `Open ${project.path} in the file manager`,
-    }),
-    // Feature-detected, not declared with `engines.tedi`: an older host simply
-    // does not show the button, rather than refusing to install the extension
-    // over one row control. `ctx.tabs.openTerminal` landed in TEDI 0.4.46.
-    typeof ctx?.tabs?.openTerminal === "function"
-      ? button("Terminal", () => void openProjectTerminal(project), {
-          icon: "lucide:SquareTerminal",
-          title: `Open a terminal in ${project.path}`,
-        })
-      : null,
-    button(
-      enabled ? "Disable" : "Enable",
-      async () => {
-        await updateProject(project.id, { enabled: !enabled });
-        // A disabled project has to stop being SERVED, not just look grey.
-        await republish();
-        refresh();
-      },
-      enabled
-        ? { variant: "danger", icon: "lucide:PowerOff" }
-        : { variant: "success", icon: "lucide:Power" },
-    ),
-    button(
-      "Remove",
-      async () => {
-        const ok = await confirm({
-          title: `Remove ${project.name}?`,
-          description:
-            "Its virtual host, certificate and hosts entry go. The folder and everything " +
-            "in it stays exactly where it is.",
-        });
-        if (!ok) return;
-        await removeProject(project.id);
-        await republish();
-        refresh();
-      },
-      { variant: "danger" },
-    ),
-  ]);
+  const right = h(
+    "div",
+    { style: "display:flex;align-items:center;gap:5px;flex:0 1 auto;min-width:0;flex-wrap:wrap" },
+    [
+      // The URL above IS a link, and inside the app a link is a small target that
+      // has to be aimed at. This is the same destination as a button, next to the
+      // one that opens the folder, so "show me this project" is one shape whether
+      // you mean the files or the site.
+      button("Browser", () => openFolder(url), {
+        icon: "lucide:ExternalLink",
+        title: `Open ${url} in your browser`,
+        disabled: !enabled,
+      }),
+      button("Folder", () => openFolder(project.path), {
+        icon: "lucide:FolderOpen",
+        title: `Open ${project.path} in the file manager`,
+      }),
+      // Feature-detected, not declared with `engines.tedi`: an older host simply
+      // does not show the button, rather than refusing to install the extension
+      // over one row control. `ctx.tabs.openTerminal` landed in TEDI 0.4.46.
+      typeof ctx?.tabs?.openTerminal === "function"
+        ? button("Terminal", () => void openProjectTerminal(project), {
+            icon: "lucide:SquareTerminal",
+            title: `Open a terminal in ${project.path}`,
+          })
+        : null,
+      button(
+        enabled ? "Disable" : "Enable",
+        async () => {
+          await updateProject(project.id, { enabled: !enabled });
+          // A disabled project has to stop being SERVED, not just look grey.
+          await republish();
+          refresh();
+        },
+        enabled
+          ? { variant: "danger", icon: "lucide:PowerOff" }
+          : { variant: "success", icon: "lucide:Power" },
+      ),
+      button(
+        "Remove",
+        async () => {
+          const ok = await confirm({
+            title: `Remove ${project.name}?`,
+            description:
+              "Its virtual host, certificate and hosts entry go. The folder and everything " +
+              "in it stays exactly where it is.",
+          });
+          if (!ok) return;
+          await removeProject(project.id);
+          await republish();
+          refresh();
+        },
+        { variant: "danger" },
+      ),
+    ],
+  );
 
   return row([left, middle, right]);
 }

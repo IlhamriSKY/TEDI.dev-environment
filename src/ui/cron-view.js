@@ -130,7 +130,7 @@ function listBody(refresh) {
  */
 function controls(refresh) {
   const jobs = listJobs();
-  return h("div", { style: "display:flex;gap:5px;align-items:center" }, [
+  return h("div", { style: "display:flex;flex-wrap:wrap;gap:5px;align-items:center" }, [
     // Said here rather than only on the Services row, because this is the
     // section where a stopped scheduler looks like a broken one: the jobs are
     // all listed, they all have schedules, and nothing happens.
@@ -175,7 +175,7 @@ function jobRow(job, refresh) {
 
   const left = h(
     "div",
-    { style: "display:flex;align-items:center;gap:8px;min-width:190px;flex:none" },
+    { style: "display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:min(190px,100%)" },
     [
       icon("lucide:CalendarClock", enabled ? "var(--primary)" : "var(--muted-foreground)"),
       h("div", { style: "display:flex;flex-direction:column;gap:0;min-width:0" }, [
@@ -196,7 +196,7 @@ function jobRow(job, refresh) {
 
   const middle = h(
     "div",
-    { style: "display:flex;align-items:center;gap:6px;flex:1;min-width:0;flex-wrap:wrap" },
+    { style: "display:flex;align-items:center;gap:6px;flex:1 1 auto;min-width:0;flex-wrap:wrap" },
     [
       pill(job.schedule),
       h("span", {
@@ -218,36 +218,40 @@ function jobRow(job, refresh) {
     ],
   );
 
-  const right = h("div", { style: "display:flex;align-items:center;gap:5px;flex:none" }, [
-    button("Run now", () => void runOnce(job, refresh), {
-      icon: "lucide:Play",
-      title: "Run this job immediately, whatever its schedule says",
-    }),
-    button(
-      enabled ? "Disable" : "Enable",
-      async () => {
-        await saveJob({ ...job, enabled: !enabled });
-        refresh();
-      },
-      enabled
-        ? { variant: "danger", icon: "lucide:PowerOff" }
-        : { variant: "success", icon: "lucide:Power" },
-    ),
-    button("Edit", () => openEditor(job, refresh), { icon: "lucide:PenLine" }),
-    button(
-      "Remove",
-      async () => {
-        const ok = await confirm({
-          title: "Remove this job?",
-          description: `${job.schedule}  ${job.command} stops running and the schedule is gone.`,
-        });
-        if (!ok) return;
-        await removeJob(job.id);
-        refresh();
-      },
-      { variant: "danger" },
-    ),
-  ]);
+  const right = h(
+    "div",
+    { style: "display:flex;align-items:center;gap:5px;flex:0 1 auto;min-width:0;flex-wrap:wrap" },
+    [
+      button("Run now", () => void runOnce(job, refresh), {
+        icon: "lucide:Play",
+        title: "Run this job immediately, whatever its schedule says",
+      }),
+      button(
+        enabled ? "Disable" : "Enable",
+        async () => {
+          await saveJob({ ...job, enabled: !enabled });
+          refresh();
+        },
+        enabled
+          ? { variant: "danger", icon: "lucide:PowerOff" }
+          : { variant: "success", icon: "lucide:Power" },
+      ),
+      button("Edit", () => openEditor(job, refresh), { icon: "lucide:PenLine" }),
+      button(
+        "Remove",
+        async () => {
+          const ok = await confirm({
+            title: "Remove this job?",
+            description: `${job.schedule}  ${job.command} stops running and the schedule is gone.`,
+          });
+          if (!ok) return;
+          await removeJob(job.id);
+          refresh();
+        },
+        { variant: "danger" },
+      ),
+    ],
+  );
 
   return row([left, middle, right]);
 }

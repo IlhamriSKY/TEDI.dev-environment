@@ -777,7 +777,7 @@ export function pill(text, opts = {}) {
     {
       title: opts.title ?? text,
       style:
-        `display:inline-flex;align-items:center;gap:4px;max-width:340px;white-space:nowrap;` +
+        `display:inline-flex;align-items:center;gap:4px;max-width:min(340px,100%);white-space:nowrap;` +
         `padding:2px 9px;border-radius:${PILL};background:var(--muted);` +
         `color:${colour};font-size:10px;font-family:ui-monospace,monospace`,
     },
@@ -808,21 +808,45 @@ function heading(title) {
  *  @param {Node} [aside] */
 export function section(title, children, aside) {
   return h("section", { style: "display:flex;flex-direction:column;gap:6px" }, [
-    h("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:8px" }, [
-      heading(title),
-      aside ?? null,
-    ]),
+    h(
+      "div",
+      {
+        style:
+          "display:flex;align-items:center;flex-wrap:wrap;justify-content:space-between;gap:8px",
+      },
+      [heading(title), aside ?? null],
+    ),
     h("div", { style: "display:flex;flex-direction:column;gap:4px" }, children),
   ]);
 }
 
-/** A bordered row. @param {(Node|string|null|false|undefined)[]} children @returns {HTMLElement} */
+/**
+ * A bordered row.
+ *
+ * It WRAPS, and that is the one thing about it worth writing down. This pane is
+ * a full-width tab exactly as often as it is a canvas window, a split, or a
+ * narrow side column, and its width has nothing to do with the viewport's - so
+ * a media query cannot see the constraint that matters here and there is none.
+ * Instead every row is built as groups that can each fall to a line of their
+ * own: an identity group that keeps its column until there is no column left,
+ * the controls, and the buttons. Wide enough and they sit on one line exactly
+ * as they always did; too narrow and they stack, rather than running off the
+ * edge behind a horizontal scrollbar nobody looks for.
+ *
+ * The rule a caller has to follow is only this: give a group `flex:0 1 auto` or
+ * `flex:1 1 auto` with `min-width:0`, never `flex:none`. `flex:none` is what
+ * makes a group refuse to shrink, and one such group is enough to push the
+ * whole row past the pane.
+ *
+ * @param {(Node|string|null|false|undefined)[]} children @returns {HTMLElement}
+ */
 export function row(children) {
   return h(
     "div",
     {
       style:
-        "display:flex;align-items:center;gap:10px;padding:6px 10px;border:1px solid var(--border);" +
+        "display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:6px 10px;" +
+        "border:1px solid var(--border);" +
         "border-radius:var(--radius, 8px);background:var(--card, var(--background))",
     },
     children,
@@ -1028,7 +1052,11 @@ export function settingRow(title, note, control) {
       h("span", { text: title, style: "font-size:12px;font-weight:600;line-height:1" }),
       muted(note),
     ]),
-    h("div", { style: "display:flex;align-items:center;gap:5px;flex:none" }, [control]),
+    h(
+      "div",
+      { style: "display:flex;align-items:center;flex-wrap:wrap;gap:5px;flex:0 1 auto;min-width:0" },
+      [control],
+    ),
   ]);
 }
 
