@@ -107,7 +107,7 @@ export function windowsShim(shim) {
     "@echo off",
     "setlocal EnableExtensions EnableDelayedExpansion",
     `set "KEY=${shim.key}"`,
-    `set "EXE=${shim.exe}${shim.viaPhp ? "" : ".exe"}"`,
+    `set "EXE=${shim.exe}"`,
     'set "BIN="',
     'set "PHPBIN="',
     'set "DIR=%CD%"',
@@ -134,23 +134,60 @@ export function windowsShim(shim) {
     ")",
     "",
     ":resolved",
-    "if not defined BIN (",
-    `  echo tedi.devenv: no ${shim.key} is configured. Open the Dev Environment pane to install one.1>&2`,
-    "  exit /b 127",
-    ")",
+    // Cleared for both branches below. `setlocal` does not unset what the
+    // parent environment already had, and a stray TARGET would be `call`ed.
+    'set "TARGET="',
   ];
 
+  // Prefer what this environment configured, and only then fall back. The two
+  // are separate blocks because composer is a phar handed to an interpreter,
+  // while everything else is a program.
   if (shim.viaPhp) {
     lines.push(
-      "if not defined PHPBIN (",
-      "  echo tedi.devenv: composer needs a PHP runtime, and none is configured.1>&2",
-      "  exit /b 127",
+      `if defined BIN if defined PHPBIN if exist "!BIN!\\${shim.exe}" (`,
+      `  "!PHPBIN!\\php.exe" "!BIN!\\${shim.exe}" %*`,
+      "  exit /b !errorlevel!",
       ")",
-      `"!PHPBIN!\\php.exe" "!BIN!\\${shim.exe}" %*`,
     );
   } else {
-    lines.push('"!BIN!\\!EXE!" %*');
+    lines.push(
+      // Which extension the real command has is NOT knowable from here, and
+      // appending `.exe` to all of them is what this used to do. Node ships
+      // `node.exe` but `npm.cmd`, `npx.cmd` and `corepack.cmd`, and the pnpm
+      // and yarn commands corepack writes next to them are `.cmd` as well - so
+      // `npm` in a TEDI terminal answered "is not recognized as an internal or
+      // external command" and nothing else. An installed, unusable toolchain.
+      // `manager/packagers.js` already knew this (`cliName`); the shim did not.
+      'if defined BIN for %%X in (.exe .cmd .bat) do if not defined TARGET if exist "!BIN!\\!EXE!%%X" set "TARGET=!BIN!\\!EXE!%%X"',
+    );
   }
+
+  lines.push(
+    // Nothing configured here, so hand over to whatever this machine had
+    // BEFORE this directory went to the front of its PATH. Most developers
+    // installing TEDI already have a Laragon, an XAMPP or a Homebrew php, and
+    // shadowing it with a shim that exits 127 does not leave them where they
+    // started - it BREAKS a php that was working, at the moment they register
+    // the terminal PATH and before they have installed anything here. The
+    // shim's job is to redirect a command when this environment has an answer,
+    // not to own the name.
+    //
+    // `%~n0` is the shim's own basename, so one line covers every command. Two
+    // candidates are skipped: our own directory, and any other directory that
+    // sits beside a `global.env` - that is a second tedi shim directory (a
+    // stale PATH entry from an older layout), and handing over to it would
+    // bounce the call back here forever.
+    'if not defined TARGET for /f "usebackq delims=" %%I in (`where %~n0 2^>nul`) do if not defined TARGET if /i not "%%~dpI"=="%~dp0" if not exist "%%~dpI..\\global.env" set "TARGET=%%I"',
+    "if not defined TARGET (",
+    `  echo tedi.devenv: %~n0 is not configured in this environment and is not on PATH. Install it from the Dev Environment pane; pnpm and yarn arrive with corepack, under Package managers.1>&2`,
+    "  exit /b 127",
+    ")",
+    // `call`, because a `.cmd` target invoked without it never hands control
+    // back and the `exit /b` below would be dead code. It is correct for an
+    // `.exe` too, so this stays one branch rather than two.
+    'call "!TARGET!" %*',
+  );
+
   lines.push("exit /b !errorlevel!", "");
   return lines.join("\r\n");
 }
@@ -210,19 +247,42 @@ export function posixShim(shim) {
     "  fi",
     "fi",
     "",
-    'if [ -z "$KEY_BIN" ]; then',
-    `  echo "tedi.devenv: no ${shim.key} is configured. Open the Dev Environment pane to install one." >&2`,
-    "  exit 127",
-    "fi",
+    'TARGET=""',
     ...(shim.viaPhp
       ? [
-          'if [ -z "$PHP_BIN_R" ]; then',
-          '  echo "tedi.devenv: composer needs a PHP runtime, and none is configured." >&2',
-          "  exit 127",
+          'if [ -n "$KEY_BIN" ] && [ -n "$PHP_BIN_R" ] && [ -f "$KEY_BIN/' + shim.exe + '" ]; then',
+          `  exec "$PHP_BIN_R/php" "$KEY_BIN/${shim.exe}" "$@"`,
           "fi",
-          `exec "$PHP_BIN_R/php" "$KEY_BIN/${shim.exe}" "$@"`,
         ]
-      : [`exec "$KEY_BIN/${shim.exe}" "$@"`]),
+      : [
+          `if [ -n "$KEY_BIN" ] && [ -x "$KEY_BIN/${shim.exe}" ]; then TARGET="$KEY_BIN/${shim.exe}"; fi`,
+        ]),
+    "",
+    // The handover. See the Windows branch for why this exists at all: a
+    // developer installing TEDI usually already has a php from Laragon or
+    // XAMPP, or a node from Homebrew, and a shim that owns the NAME without
+    // being able to answer would break a working command the moment the
+    // terminal PATH is registered.
+    'if [ -z "$TARGET" ]; then',
+    '  self=$(cd "$(dirname "$0")" 2>/dev/null && pwd)',
+    '  name=$(basename "$0")',
+    "  old_ifs=$IFS",
+    "  IFS=:",
+    "  for d in $PATH; do",
+    '    [ -n "$d" ] || continue',
+    '    [ "$d" = "$self" ] && continue',
+    // A directory sitting beside a `global.env` is another tedi shim
+    // directory - a stale PATH entry - and handing over to it would bounce.
+    '    [ -f "$d/../global.env" ] && continue',
+    '    if [ -x "$d/$name" ]; then TARGET="$d/$name"; break; fi',
+    "  done",
+    "  IFS=$old_ifs",
+    "fi",
+    'if [ -z "$TARGET" ]; then',
+    '  echo "tedi.devenv: $(basename "$0") is not configured in this environment and is not on PATH. Install it from the Dev Environment pane." >&2',
+    "  exit 127",
+    "fi",
+    'exec "$TARGET" "$@"',
     "",
   ].join("\n");
 }

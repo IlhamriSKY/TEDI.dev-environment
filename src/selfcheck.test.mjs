@@ -543,18 +543,32 @@ mkdirSync(nested, { recursive: true });
 
 const phpShim = SHIMS.find((s) => s.name === "php");
 
-/** @param {string} cwd @returns {{ code: number, out: string }} */
-function runShim(cwd, file) {
+/**
+ * @param {string} cwd @param {string} file
+ * @param {string} [prepend] A directory to put FIRST on PATH, which is what the
+ *   handover searches once this environment has no answer.
+ * @returns {{ code: number, out: string }}
+ */
+function runShim(cwd, file, prepend) {
   const isWin = process.platform === "win32";
-  const res = isWin
-    ? spawnSync("cmd.exe", ["/c", file], { cwd, encoding: "utf8" })
-    : spawnSync("sh", [file], { cwd, encoding: "utf8" });
+  const env = { ...process.env };
+  if (prepend !== undefined) {
+    // Windows spells it `Path`, and two keys differing only in case is a
+    // coin toss over which one the child reads.
+    const sep = isWin ? ";" : ":";
+    const current = env.PATH ?? env.Path ?? "";
+    for (const key of Object.keys(env)) if (/^path$/i.test(key)) delete env[key];
+    env.PATH = `${prepend}${sep}${current}`;
+  }
+  const opts = { cwd, encoding: "utf8", env };
+  const res = isWin ? spawnSync("cmd.exe", ["/c", file], opts) : spawnSync("sh", [file], opts);
   return { code: res.status ?? -1, out: `${res.stdout ?? ""}${res.stderr ?? ""}` };
 }
 
 /**
- * What the shim prints when the walk and the fallback both came up empty. That
- * message - not an exit code - is the thing these tests are actually about.
+ * What the shim prints when the walk, the fallback AND the handover to PATH all
+ * came up empty. That message - not an exit code - is the thing these tests are
+ * actually about.
  *
  * The tests used to assert `code !== 127`, on the reasoning that 127 is the
  * shim's own "nothing is configured" exit. That holds on Windows and is WRONG on
@@ -562,40 +576,52 @@ function runShim(cwd, file) {
  * not found"), so the two states the assertion separates produce the same
  * number, and all three tests failed the first time CI ran them on Linux.
  */
-const UNCONFIGURED = /no PHP_BIN is configured/i;
+const UNCONFIGURED = /is not configured in this environment/i;
 
 /**
- * A runtime directory the shim can resolve, and on POSIX actually execute.
+ * A runtime directory the shim can resolve AND execute, on either platform.
  *
- * POSIX gets a real `php` script, so the test proves the resolved path is not
- * merely computed but RUN. Windows shims exec `php.exe` specifically, and a
- * genuine one cannot be fabricated here - so there the assertion stays at "the
- * shim resolved something instead of giving up", which is what it can honestly
- * check.
+ * Windows gets a `.cmd`, which it could not before: the shim used to exec
+ * `php.exe` specifically and a genuine one cannot be fabricated here, so every
+ * assertion below could only be "it resolved something". Now that the shim
+ * resolves `.exe`, `.cmd` or `.bat`, a fake IS runnable and these tests check
+ * what they were always meant to check - that the RIGHT binary ran.
  *
  * @param {string} dir @param {string} marker @returns {string} the dir
  */
 function fakeRuntime(dir, marker) {
   mkdirSync(dir, { recursive: true });
-  if (process.platform !== "win32") {
-    const exe = join(dir, "php");
-    writeFileSync(exe, `#!/bin/sh\necho ${marker}\n`);
-    chmodSync(exe, 0o755);
-  }
+  const win = process.platform === "win32";
+  const exe = join(dir, win ? "php.cmd" : "php");
+  writeFileSync(exe, win ? `@echo off\r\necho ${marker}\r\n` : `#!/bin/sh\necho ${marker}\n`);
+  if (!win) chmodSync(exe, 0o755);
   return dir;
 }
 
-/** True when the shim ran the fake and it printed its marker. POSIX only. */
-const ranMarker = (out, marker) =>
-  process.platform === "win32" ? true : new RegExp(marker).test(out);
+/** True when the shim ran the fake and it printed its marker. */
+const ranMarker = (out, marker) => new RegExp(marker).test(out);
 
 const shimFile = join(shimsDir, process.platform === "win32" ? "php.cmd" : "php");
 writeFileSync(shimFile, process.platform === "win32" ? windowsShim(phpShim) : posixShim(phpShim));
 
-test("reports a clear error, and exit 127, when nothing is configured", () => {
-  const { code, out } = runShim(nested, shimFile);
+/** Where a directory prepended by `runShim` is joined onto the real PATH. */
+const PATH_SEP = process.platform === "win32" ? ";" : ":";
+
+test("exits 127 with a clear message when neither this environment nor PATH can answer", () => {
+  // A command no machine has. The php shim cannot test this any more, and that
+  // is the point of the release: on a developer's laptop `php` now finds the
+  // Laragon, XAMPP or Homebrew one rather than dying.
+  const orphan = /** @type {(typeof SHIMS)[number]} */ ({
+    name: "tedi-no-such-command",
+    key: "NODE_BIN",
+    exe: "tedi-no-such-command",
+  });
+  const win = process.platform === "win32";
+  const file = join(shimsDir, win ? `${orphan.name}.cmd` : orphan.name);
+  writeFileSync(file, win ? windowsShim(orphan) : posixShim(orphan));
+  const { code, out } = runShim(nested, file);
   assert.equal(code, 127, `expected exit 127, got ${code}: ${out}`);
-  assert.match(out, /no PHP_BIN is configured/i);
+  assert.match(out, UNCONFIGURED);
 });
 
 test("walks UP from the working directory to find .tedi-runtime", () => {
@@ -629,6 +655,57 @@ test("a comment line in the runtime file is not parsed as a key", () => {
   assert.ok(!out.includes("commented"), `used a commented-out line: ${out}`);
   assert.doesNotMatch(out, UNCONFIGURED, `the commented line broke the parse: ${out}`);
   assert.ok(ranMarker(out, "RIGHT_PHP_RAN"), `did not run the uncommented value: ${out}`);
+});
+
+test("hands over to the php already on PATH when this environment has none", () => {
+  // The case that decides whether this is safe to put FIRST on someone's PATH.
+  // Most laptops already have a php from Laragon or XAMPP, and a shim that owns
+  // the name without being able to answer would break a working command at the
+  // moment the user registers the terminal PATH - before they have installed
+  // anything here.
+  //
+  // The shim's OWN directory is prepended too, ahead of the system one, so this
+  // also proves the handover skips itself. Without that skip the call bounces
+  // back into the same script forever.
+  rmSync(join(tmp, "project", ".tedi-runtime"), { force: true });
+  rmSync(join(tmp, "global.env"), { force: true });
+  const onPath = fakeRuntime(join(tmp, "system-php"), "SYSTEM_PHP_RAN");
+  const { out } = runShim(nested, shimFile, `${shimsDir}${PATH_SEP}${onPath}`);
+  assert.ok(ranMarker(out, "SYSTEM_PHP_RAN"), `did not hand over to the php on PATH: ${out}`);
+});
+
+test("prefers the runtime this environment configured over the one on PATH", () => {
+  // The handover must never shadow the whole point of the shim.
+  fakeRuntime(join(tmp, "ours"), "OURS_RAN");
+  const onPath = fakeRuntime(join(tmp, "system-php"), "SYSTEM_PHP_RAN");
+  writeFileSync(join(tmp, "project", ".tedi-runtime"), `PHP_BIN=${join(tmp, "ours")}\n`);
+  const { out } = runShim(nested, shimFile, onPath);
+  assert.ok(ranMarker(out, "OURS_RAN"), `the handover shadowed the configured runtime: ${out}`);
+  assert.ok(!/SYSTEM_PHP_RAN/.test(out), `ran the PATH copy as well: ${out}`);
+});
+
+test("runs a Node command that ships as a .cmd rather than an .exe", () => {
+  // The assertion the php tests above cannot make. A fake `.cmd` (or a POSIX
+  // shell script) IS executable, so this proves the shim RAN the real command
+  // instead of merely computing a path to it. npm, npx and corepack ship as
+  // `.cmd` on Windows, and the shim used to append `.exe` to every name - so
+  // `npm` in a TEDI terminal only ever printed "is not recognized as an
+  // internal or external command".
+  const npmShim = /** @type {(typeof SHIMS)[number]} */ (SHIMS.find((s) => s.name === "npm"));
+  const win = process.platform === "win32";
+  const binDir = join(tmp, "fake-node");
+  mkdirSync(binDir, { recursive: true });
+  const target = join(binDir, win ? "npm.cmd" : "npm");
+  writeFileSync(
+    target,
+    win ? "@echo off\r\necho FAKE_NPM_RAN\r\n" : "#!/bin/sh\necho FAKE_NPM_RAN\n",
+  );
+  if (!win) chmodSync(target, 0o755);
+  const file = join(shimsDir, win ? "npm.cmd" : "npm");
+  writeFileSync(file, win ? windowsShim(npmShim) : posixShim(npmShim));
+  writeFileSync(join(tmp, "project", ".tedi-runtime"), `NODE_BIN=${binDir}\n`);
+  const { out } = runShim(nested, file);
+  assert.match(out, /FAKE_NPM_RAN/, `the shim did not run ${target}: ${out}`);
 });
 
 console.log("\nasking before destroying (source, because a modal needs a DOM)");

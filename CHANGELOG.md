@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.1.35
+
+- **`npm` never worked through the shims on Windows.** The generated shim
+  appended `.exe` to every command name, and Node ships `node.exe` but
+  `npm.cmd`, `npx.cmd` and `corepack.cmd` - so `npm` in a TEDI terminal answered
+  "is not recognized as an internal or external command" and nothing else. The
+  pnpm and yarn commands corepack writes next to Node are `.cmd` as well, so
+  every package manager this environment offers was installed and unusable.
+  `manager/packagers.js` already knew this and named them through `cliName()`;
+  the shim did not. It now resolves `.exe`, `.cmd` or `.bat` at run time and
+  invokes the result through `call`, because a `.cmd` started without it never
+  hands control back and the exit code that follows would be dead code.
+
+- **A shim that could not answer used to break a command that worked.** The shim
+  directory goes to the FRONT of the terminal PATH, so it owns the names `php`,
+  `node`, `npm` and `composer` for every terminal TEDI opens - and most people
+  installing this already have a php from Laragon or XAMPP, or a node from
+  Homebrew. Until now, a name this environment had no runtime for exited 127
+  with "no PHP_BIN is configured", which means registering the terminal PATH
+  BROKE a working `php` before the user had installed anything here. A shim's
+  job is to redirect a command when this environment has an answer, not to own
+  the name: with nothing configured it now hands over to the next matching
+  command on PATH, so a terminal behaves exactly as it did before TEDI existed.
+  Two candidates are skipped - its own directory, and any other directory
+  sitting beside a `global.env`, which is a second shim directory left by a
+  stale PATH entry - because handing over to either bounces the call back
+  forever. A configured runtime still wins over anything on PATH; that is
+  asserted, not assumed.
+
+  The self-checks grew with it: a fake runtime is now a `.cmd` on Windows rather
+  than nothing, so every one of these tests RUNS the resolved command instead of
+  merely proving a path was computed, which is what they were always meant to
+  check.
+
 ## 0.1.34
 
 - **A PHP this extension installed could not run Composer, let alone Laravel.**
