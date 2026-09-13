@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.39
+
+- **The four status lights no longer breathe in lockstep.** They shared one
+  animation, so a rack of independent services rose and fell as a single unit,
+  which reads as one animation with four heads rather than four things running.
+  Each seat now carries its own duration and its own negative delay, so every
+  light starts mid-breath instead of all beginning at full on the first frame.
+  The durations are deliberately non-harmonic: staggering only the delays would
+  bring them back into phase on every cycle. The values are fixed rather than
+  random because the icon is rebuilt on every service poll, and a new data URL
+  each time would reload the `<img>` and restart the animation, producing a
+  jitter instead of a glow. See [server-icon.js](src/ui/server-icon.js).
+
 ## 0.1.38
 
 - **The status-bar icon now has one light per service.** It was

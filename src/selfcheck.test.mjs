@@ -1566,6 +1566,18 @@ test("each light sits on its own service, in the documented seat", () => {
   assert.ok(svg.includes('<rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>'));
 });
 
+test("no two lights breathe on the same beat", () => {
+  // Four halos on one duration is four heads of one animation, which is the one
+  // thing a rack never looks like. Distinct, non-harmonic durations are what
+  // keep them from re-aligning every cycle; negative delays are what stop them
+  // starting together on the first frame.
+  const svg = decodeURIComponent(serverIcon(() => "on"));
+  const beats = [...svg.matchAll(/animation-duration:([\d.]+)s;animation-delay:(-[\d.]+)s/g)];
+  assert.equal(beats.length, 4, "every lit halo carries its own tempo");
+  assert.equal(new Set(beats.map((m) => m[1])).size, 4, "two seats share a duration");
+  assert.equal(new Set(beats.map((m) => m[2])).size, 4, "two seats start on the same frame");
+});
+
 test("both web servers share the top-left seat, and a failure wins it", () => {
   // nginx serving is not the thing to report when Apache just died trying to
   // take the port off it.

@@ -26,11 +26,24 @@
  *  Four lights for six services: `cron` is a timer inside this extension, not
  *  something you connect to, and the two web servers are exclusive (the ticked
  *  one is the one project URLs point at), so they share the top-left seat. */
+//  `dur` and `delay` are what stop the four breathing as one. Four lights
+//  rising and falling on the same beat reads as one animation with four heads,
+//  which is the one thing a rack never looks like; four independent services
+//  have no reason to agree. The durations are deliberately non-harmonic, so the
+//  lights drift apart and never come back into phase - a shared duration with
+//  only the delays staggered re-aligns on every cycle. The delays are negative
+//  to start each light already mid-breath: at 0 they would all begin at full
+//  and the first second would be the lockstep this exists to avoid.
+//
+//  Fixed values rather than `Math.random()` on purpose. This function re-runs on
+//  every service poll, so random timings would change the data URL each time,
+//  reload the `<img>`, and restart the animation from the top - a jitter, not a
+//  glow. Constants keep the URL identical while nothing has changed.
 const LAMPS = [
-  { x: 6, y: 6, ids: ["nginx", "apache"] },
-  { x: 18, y: 6, ids: ["redis"] },
-  { x: 6, y: 18, ids: ["mysql"] },
-  { x: 18, y: 18, ids: ["postgres"] },
+  { x: 6, y: 6, ids: ["nginx", "apache"], dur: 2.4, delay: -0.7 },
+  { x: 18, y: 6, ids: ["redis"], dur: 3.1, delay: -1.9 },
+  { x: 6, y: 18, ids: ["mysql"], dur: 2.7, delay: -2.3 },
+  { x: 18, y: 18, ids: ["postgres"], dur: 3.5, delay: -0.4 },
 ];
 
 // How wide the halo is, and how far it is blurred.
@@ -58,7 +71,8 @@ const HALO_BLUR = 1.0;
  * reaches it. Scripts are blocked in that context and declarative animation is
  * not, which is exactly why the animation had to be CSS.
  *
- * 2.4s is slow on purpose. This is the only thing in the status bar that moves
+ * 2.4s is the DEFAULT tempo - each seat overrides it with its own (see
+ * `LAMPS`) - and it is slow on purpose. This is the only thing in the status bar that moves
  * with nothing happening, and anything quicker turns a bar you are supposed to
  * glance at into something that keeps asking to be looked at. It also costs a
  * repaint forever, so if that ever shows up in a profile, deleting this
@@ -96,7 +110,7 @@ function token(name, fallback) {
  * four seats have to stay visible or the glyph changes shape as services come
  * up, and a light you can see is off says more than an empty rack.
  *
- * @param {{ x: number, y: number }} seat
+ * @param {{ x: number, y: number, dur: number, delay: number }} seat
  * @param {"on" | "error" | "off"} state
  * @param {{ on: string, error: string, off: string }} colours
  */
@@ -108,8 +122,14 @@ function lamp(seat, state, colours) {
   // a light going off and on, which reads as a fault however green it is; a
   // steady core under a breathing halo is the same LED with its glow rising and
   // falling, and it never stops saying "this service is up".
+  //
+  // The seat's own tempo is inline because an attribute beats the `.b` rule; the
+  // class still carries the name, easing and reduced-motion reset, so a light
+  // only overrides WHEN it breathes, never WHETHER.
+  const beat = `animation-duration:${seat.dur}s;animation-delay:${seat.delay}s`;
   return (
-    `<circle ${at} r="${HALO_R}" fill="${colour}" opacity=".8" filter="url(#glow)" class="b"/>` +
+    `<circle ${at} r="${HALO_R}" fill="${colour}" opacity=".8" filter="url(#glow)" ` +
+    `class="b" style="${beat}"/>` +
     `<circle ${at} r="1" fill="${colour}"/>`
   );
 }
