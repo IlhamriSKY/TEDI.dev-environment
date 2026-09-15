@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.41
+
+- **Sharing moved into Settings.** The local network switch and the list of
+  live public links were a dashboard section between Services and Projects,
+  where a switch you flip once pushed the project list down a screen on every
+  paint. They are now a Sharing group in the Settings dialog. The pane's header
+  line still says "shared on the network" and how many public links are open,
+  so an environment reachable from outside is never hidden behind a dialog.
+- **The Settings dialog is laid out as one form.** Each setting was its own
+  bordered card two pixels from the next, which read as a stack of unrelated
+  alerts. Settings are now grouped (Domains, Sharing) into one card per group
+  with hairline dividers, on/off settings use a switch drawn like
+  `components/ui/switch.tsx` instead of a small checkbox, a long description
+  wraps beside its control instead of pushing it underneath, and Done fills
+  the footer like every TEDI dialog. The dialog repaints in place while open,
+  so a public link going from connecting to its address shows up without
+  reopening it, and a repaint never rebuilds the field being typed in.
+- A project's "Opening a public link" line shows the cloudflared download
+  percentage the first time, which is the only slow part.
+
 ## 0.1.40
 
 - **Share your projects with the local network, or switch it off.** A new

@@ -755,6 +755,70 @@ export function checkbox(checked, opts = {}) {
 }
 
 /**
+ * An on/off switch, drawn the way `components/ui/switch.tsx` draws one.
+ *
+ * For a SETTING, where a checkbox reads as "pick from a list": a 44x20 track
+ * with a 2px border, filled `--primary` when on and `--input` when off, and a
+ * 24x16 thumb that slides 16px. It flips the moment it is clicked, before
+ * `onChange` settles, because some of these wait on an administrator prompt
+ * and a switch that sits unmoved for five seconds reads as a missed click.
+ *
+ * @param {boolean} on
+ * @param {(next: boolean) => unknown | Promise<unknown>} onChange
+ * @param {{ label?: string }} [opts]
+ * @returns {HTMLButtonElement}
+ */
+export function switchControl(on, onChange, opts = {}) {
+  const thumb = h("span", {
+    style:
+      `display:block;width:24px;height:16px;border-radius:${PILL};pointer-events:none;` +
+      "box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .15s ease,background-color .15s ease",
+  });
+  const track = /** @type {HTMLButtonElement} */ (
+    h(
+      "button",
+      {
+        attrs: {
+          type: "button",
+          role: "switch",
+          ...(opts.label ? { "aria-label": opts.label } : {}),
+        },
+        style:
+          "position:relative;display:inline-flex;align-items:center;flex:none;width:44px;height:20px;" +
+          `padding:0;box-sizing:border-box;border-radius:${PILL};border:2px solid transparent;` +
+          "cursor:pointer;outline:none;transition:background-color .15s ease,border-color .15s ease",
+      },
+      [thumb],
+    )
+  );
+  /** @param {boolean} value */
+  const draw = (value) => {
+    track.setAttribute("aria-checked", String(value));
+    track.style.background = value
+      ? "var(--primary)"
+      : "color-mix(in oklab,var(--input) 90%,transparent)";
+    track.style.borderColor = value ? "var(--primary)" : "transparent";
+    thumb.style.background = value ? "var(--primary-foreground)" : "var(--foreground)";
+    thumb.style.transform = `translateX(${value ? 16 : 0}px)`;
+  };
+  draw(on);
+  track.addEventListener("focus", () => (track.style.boxShadow = "0 0 0 2px var(--ring)"));
+  track.addEventListener("blur", () => (track.style.boxShadow = "none"));
+  track.addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    if (track.disabled) return;
+    track.disabled = true;
+    draw(!on);
+    try {
+      await onChange(!on);
+    } finally {
+      track.disabled = false;
+    }
+  });
+  return track;
+}
+
+/**
  * A state, as a glyph in the app's own status colours.
  *
  * This was a 6px filled square. A square carries its whole meaning in its fill,

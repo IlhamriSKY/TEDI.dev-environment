@@ -36,7 +36,7 @@ import { openFolder } from "../core/proc.js";
 import { mkdirp, exists } from "../core/fsx.js";
 import { publish, republish } from "../web/publish.js";
 import { lanAddresses, lanUrl, startTunnel, stopTunnel } from "../web/share.js";
-import { state, config, ctx } from "../runtime.js";
+import { state, config, ctx, loudBusy } from "../runtime.js";
 
 /** @typedef {import("../runtime.js").Project} Project */
 
@@ -180,7 +180,7 @@ async function projectRow(project, refresh, ip) {
                 tunnel.url,
                 "Public link: anyone with it can open this project",
               )
-            : muted("Opening a public link…")
+            : muted(publicLinkProgress())
           : null,
       ]),
     ],
@@ -306,6 +306,15 @@ function shareLink(glyph, url, title) {
         "text-overflow:ellipsis;white-space:nowrap",
     }),
   ]);
+}
+
+/** What a link that has no address yet is waiting on. The first one downloads
+ *  cloudflared, which is the only slow part worth a number.
+ *  @returns {string} */
+function publicLinkProgress() {
+  const busy = loudBusy("cloudflared");
+  if (!busy) return "Opening a public link…";
+  return `Downloading cloudflared${busy.pct === undefined ? "…" : ` ${busy.pct}%`}`;
 }
 
 /** @param {string} text @returns {Promise<void>} */

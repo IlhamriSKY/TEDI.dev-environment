@@ -16,7 +16,6 @@ import { h, button, muted, section, row, pill, icon, status, progress } from "./
 import { runtimesView } from "./runtimes-view.js";
 import { servicesView } from "./services-view.js";
 import { projectsView } from "./projects-view.js";
-import { shareView } from "./share-view.js";
 import { openSettings } from "./settings-view.js";
 import { state, config, ctx } from "../runtime.js";
 import { paths, layoutDirs } from "../core/paths.js";
@@ -115,11 +114,9 @@ async function paint(root, refresh, current) {
 
   // Projects reads every project's config to resolve its runtime, so it is
   // appended when it resolves rather than holding the whole panel blank.
-  // Sharing likewise asks the routing table, so both resolve before either is
-  // appended: appended one at a time they would swap places on a slow probe.
-  const [sharing, projects] = await Promise.all([shareView(refresh), projectsView(refresh)]);
+  const projects = await projectsView(refresh);
   if (!current()) return;
-  root.append(sharing, projects);
+  root.append(projects);
 }
 
 /**
@@ -276,7 +273,20 @@ function header(ready, refresh) {
         h("strong", { text: "Dev Environment", style: "font-size:13.5px" }),
         muted(
           ready
-            ? `${config.webServer} · *.${config.domainSuffix} · ${paths.root()}`
+            ? [
+                config.webServer,
+                `*.${config.domainSuffix}`,
+                // The switch lives in Settings, so the pane says when it is ON:
+                // an environment reachable from the network should never be a
+                // fact you have to open a dialog to find out.
+                config.shareLan ? "shared on the network" : null,
+                state.tunnels.size > 0
+                  ? `${state.tunnels.size} public link${state.tunnels.size === 1 ? "" : "s"}`
+                  : null,
+                paths.root(),
+              ]
+                .filter(Boolean)
+                .join(" · ")
             : "Not set up yet",
         ),
       ]),
@@ -295,7 +305,7 @@ function header(ready, refresh) {
             ),
             button("Settings", () => openSettings(refresh), {
               icon: "lucide:Settings",
-              title: "Domain suffix and the hosts file",
+              title: "Domains, the hosts file, and sharing on the network or the internet",
             }),
           ])
         : null,
