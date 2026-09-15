@@ -43,6 +43,11 @@ export function setCtx(value) {
  *   turned it back on every launch would be arguing with them.
  * @property {boolean} skipTerminalPath  The user chose to leave the terminal
  *   PATH alone. Their decision, remembered, not a step still outstanding.
+ * @property {boolean} shareLan  Projects answer to other devices on the local
+ *   network, each on its own port. Off means loopback only, everything.
+ * @property {string[]} firewallAllowed  Web-server executables the Windows
+ *   firewall has already been told to let in, so turning sharing on again asks
+ *   for no second administrator prompt.
  */
 
 /** @type {DevenvConfig} */
@@ -59,6 +64,8 @@ export const config = {
   autostart: {},
   seedGeneration: 0,
   skipTerminalPath: false,
+  shareLan: false,
+  firewallAllowed: [],
 };
 
 /** @param {Partial<DevenvConfig>} patch */
@@ -123,6 +130,9 @@ export function setConfig(patch) {
  * @property {number} [proxyPort] Backend port when `kind` is "proxy".
  * @property {boolean} [https]
  * @property {boolean} [enabled]
+ * @property {number} [sharePort] Plain-http port the project answers on without
+ *   a hostname, for the local network and for a public tunnel. Assigned once
+ *   and kept, so an address opened on a phone still works tomorrow.
  */
 
 export const state = {
@@ -189,6 +199,14 @@ export const state = {
    *  counter is enough: the signature only has to DIFFER, it does not have to
    *  describe what happened. */
   cronRuns: 0,
+
+  /**
+   * Public tunnels, project id -> the cloudflared process and the address it
+   * was given. Not persisted: a quick tunnel's address is new every time, so
+   * one surviving a restart would be a link to nothing.
+   * @type {Map<string, { handle: number, url: string | null, error: string | null }>}
+   */
+  tunnels: new Map(),
 };
 
 /**
@@ -217,7 +235,10 @@ export function statusSignature() {
   const busy = [...state.busy.entries()]
     .map(([id, b]) => `${id}:${b.text}:${b.pct ?? ""}`)
     .join("|");
-  return `${services}#${installed}#${busy}#${state.projects.length}#${state.cronRuns}`;
+  const tunnels = [...state.tunnels.entries()]
+    .map(([id, t]) => `${id}:${t.url ?? ""}:${t.error ?? ""}`)
+    .join("|");
+  return `${services}#${installed}#${busy}#${state.projects.length}#${state.cronRuns}#${tunnels}`;
 }
 
 /**

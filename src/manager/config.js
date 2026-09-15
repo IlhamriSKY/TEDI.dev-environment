@@ -35,6 +35,7 @@ const SETTING_KEYS = /** @type {const} */ ([
   ["httpsPort", 443],
   ["autoHttps", true],
   ["manageHosts", true],
+  ["shareLan", false],
 ]);
 
 /**
@@ -48,7 +49,8 @@ const SETTING_KEYS = /** @type {const} */ ([
  *
  * @typedef {{ defaults?: Record<string, string>, ports?: Record<string, number>,
  *             autostart?: Record<string, boolean>, seedGeneration?: number,
- *             driversSeeded?: boolean, skipTerminalPath?: boolean }} StoredConfig
+ *             driversSeeded?: boolean, skipTerminalPath?: boolean,
+ *             firewallAllowed?: string[] }} StoredConfig
  */
 
 /**
@@ -110,6 +112,7 @@ export async function loadConfig() {
           ? 1
           : 0,
     skipTerminalPath: stored.skipTerminalPath === true,
+    firewallAllowed: Array.isArray(stored.firewallAllowed) ? stored.firewallAllowed : [],
   });
 }
 
@@ -123,8 +126,16 @@ async function saveConfig() {
     autostart: config.autostart,
     seedGeneration: config.seedGeneration,
     skipTerminalPath: config.skipTerminalPath,
+    firewallAllowed: config.firewallAllowed,
   };
   await writeJson(paths.configFile(), stored);
+}
+
+/** Remember which executables the Windows firewall now lets in.
+ *  @param {string[]} exes @returns {Promise<void>} */
+export async function rememberFirewall(exes) {
+  setConfig({ firewallAllowed: [...new Set([...config.firewallAllowed, ...exes])] });
+  await saveConfig();
 }
 
 /**
@@ -229,6 +240,9 @@ function normalise(key, value) {
   // See `hostname`: this string ends up as a filename and as a server
   // directive, so "usable hostname" is the only thing it is allowed to be.
   if (key === "domainSuffix") return hostname(value) || "test";
+  // Decides whether a server listens beyond this machine, so only a real `true`
+  // opens it. A hand-edited "false" string is truthy and must not.
+  if (key === "shareLan") return value === true;
   return value;
 }
 

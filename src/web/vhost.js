@@ -22,7 +22,7 @@ import { paths, join } from "../core/paths.js";
 import { writeText, mkdirp, remove, readDir } from "../core/fsx.js";
 import { config, state, warn } from "../runtime.js";
 import { servedProject } from "../tools/phpmyadmin.js";
-import { domainOf, docRootOf } from "../project/projects.js";
+import { domainOf, docRootOf, assignSharePorts } from "../project/projects.js";
 import { resolveProject } from "../project/resolve.js";
 import { resolveVersion } from "../manager/versions.js";
 import { activeVersion } from "../manager/config.js";
@@ -66,6 +66,22 @@ export async function servedProjects() {
 }
 
 /**
+ * Does this project get a share listener: its own port, no hostname, plain http?
+ *
+ * Every project while the local network is shared, and a project with a public
+ * tunnel whether or not it is, because the tunnel needs something that answers
+ * without `project.test` in the Host header. Never a tool: phpMyAdmin logs in
+ * as a passwordless root, and handing that to the network is not what "share
+ * my site" means.
+ *
+ * @param {Project} project @returns {boolean}
+ */
+export function isShared(project) {
+  if (project.enabled === false || project.id.startsWith("tool:")) return false;
+  return config.shareLan || state.tunnels.has(project.id);
+}
+
+/**
  * Configuration for every enabled project, for one server.
  *
  * @param {Project[]} projects
@@ -103,6 +119,11 @@ export async function generate(projects, server = config.webServer) {
   const files = [];
   let written = 0;
 
+  await assignSharePorts(projects.filter(isShared));
+  /** Every share port this config listens on, for Apache's `Listen` lines. */
+  /** @type {number[]} */
+  const sharePorts = [];
+
   for (const project of projects) {
     if (project.enabled === false) continue;
     const domain = domainOf(project);
@@ -120,10 +141,15 @@ export async function generate(projects, server = config.webServer) {
     const runtime = await resolveProject(project);
     const https = project.https ?? config.autoHttps;
     const cert = https ? await certificateFor([domain, `www.${domain}`]) : null;
+    const share =
+      isShared(project) && project.sharePort
+        ? { port: project.sharePort, lan: config.shareLan }
+        : null;
+    if (share) sharePorts.push(share.port);
 
     const body =
       server === "nginx"
-        ? nginxVhost({ project, domain, root, runtime, cert, server, ports })
+        ? nginxVhost({ project, domain, root, runtime, cert, server, ports, share })
         : apacheVhost({
             project,
             domain,
@@ -134,6 +160,7 @@ export async function generate(projects, server = config.webServer) {
             cert: apache?.modules.has("mod_ssl.so") ? cert : null,
             server,
             ports,
+            share,
           });
 
     files.push({ name: `${domain}.conf`, body });
@@ -163,7 +190,10 @@ export async function generate(projects, server = config.webServer) {
   if (server === "nginx") {
     await writeText(join(paths.conf("nginx"), "nginx.conf"), nginxMain(confDir, ports));
   } else if (apache) {
-    await writeText(join(paths.conf("apache"), "httpd.conf"), apacheMain(apache, ports));
+    await writeText(
+      join(paths.conf("apache"), "httpd.conf"),
+      apacheMain(apache, ports, sharePorts, config.shareLan),
+    );
   }
 
   return { domains, written };
@@ -178,7 +208,22 @@ export async function generate(projects, server = config.webServer) {
  * @property {import("./certs.js").CertPair | null} cert
  * @property {"nginx" | "apache"} server
  * @property {{ http: number, https: number }} ports
+ * @property {{ port: number, lan: boolean } | null} [share]  A second, plain
+ *   http listener with no hostname. `lan` binds it to every interface; without
+ *   it the listener is loopback, there only for a tunnel to reach.
  */
+
+/**
+ * The address a MAIN listener binds: this machine, always.
+ *
+ * `listen 80` binds every interface, and it did. So with sharing nowhere in
+ * sight any device on the network could send `Host: phpmyadmin.test` to this
+ * machine's address and land on a phpMyAdmin that logs in as root with no
+ * password. The domains only ever resolve to 127.0.0.1 through the hosts file,
+ * so nothing that uses them loses anything; what the network gets instead is
+ * the share listener, per project, and only while sharing is on.
+ */
+const LOOPBACK = "127.0.0.1:";
 
 /** Forward slashes: both servers accept them on Windows and neither accepts an
  *  unescaped backslash inside a quoted path.
@@ -206,67 +251,85 @@ export function renderVhost(input) {
   return input.server === "nginx" ? nginxVhost(input) : apacheVhost(input);
 }
 
+/**
+ * The `location` blocks that actually serve a project.
+ *
+ * `forwarded` is the share listener's variant. A tunnel terminates TLS at its
+ * edge and reaches us over plain http, so without it PHP sees http, and an app
+ * that builds absolute URLs (every Laravel `asset()`) writes `http://` into an
+ * https page and the browser blocks every stylesheet as mixed content. So the
+ * proxy's own `X-Forwarded-Proto` is believed there - `$tedi_forwarded_*` are
+ * the maps in `nginxMain` - and only there. Believing it from a LAN device costs
+ * nothing: it is a development site telling itself which scheme to link to.
+ *
+ * @param {Project} project @param {number | null} php @param {boolean} forwarded
+ * @returns {string[]}
+ */
+function nginxLocations(project, php, forwarded) {
+  if (project.kind === "proxy" && project.proxyPort) {
+    return [
+      "    location / {",
+      `        proxy_pass http://127.0.0.1:${project.proxyPort};`,
+      "        proxy_set_header Host $host;",
+      "        proxy_set_header X-Real-IP $remote_addr;",
+      "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
+      `        proxy_set_header X-Forwarded-Proto ${forwarded ? "$tedi_forwarded_proto" : "$scheme"};`,
+      // A dev server that hot-reloads needs its websocket to survive.
+      "        proxy_http_version 1.1;",
+      "        proxy_set_header Upgrade $http_upgrade;",
+      '        proxy_set_header Connection "upgrade";',
+      "    }",
+    ];
+  }
+  return [
+    "    location / {",
+    "        try_files $uri $uri/ /index.php?$query_string;",
+    "    }",
+    ...(php
+      ? [
+          "",
+          "    location ~ \\.php$ {",
+          "        try_files $uri =404;",
+          `        fastcgi_pass 127.0.0.1:${php};`,
+          "        fastcgi_index index.php;",
+          `        include "${conf(join(paths.conf("nginx"), "fastcgi_params"))}";`,
+          ...(forwarded ? ["        fastcgi_param HTTPS $tedi_forwarded_https if_not_empty;"] : []),
+          "        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;",
+          "        fastcgi_param PATH_INFO $fastcgi_path_info;",
+          "        fastcgi_read_timeout 300;",
+          "    }",
+        ]
+      : []),
+    "",
+    // Deny the dotfiles a document root should never serve. Cheap, and the
+    // one that matters is .env.
+    "    location ~ /\\.(?!well-known) { deny all; }",
+  ];
+}
+
 /** @param {VhostInput} input @returns {string} */
-function nginxVhost({ project, domain, root, runtime, cert, server, ports }) {
+function nginxVhost({ project, domain, root, runtime, cert, server, ports, share }) {
   const php = runtime.php ? fastcgiPort(runtime.php) : null;
-  const isProxy = project.kind === "proxy" && project.proxyPort;
 
-  const location = isProxy
-    ? [
-        "    location / {",
-        `        proxy_pass http://127.0.0.1:${project.proxyPort};`,
-        "        proxy_set_header Host $host;",
-        "        proxy_set_header X-Real-IP $remote_addr;",
-        "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
-        "        proxy_set_header X-Forwarded-Proto $scheme;",
-        // A dev server that hot-reloads needs its websocket to survive.
-        "        proxy_http_version 1.1;",
-        "        proxy_set_header Upgrade $http_upgrade;",
-        '        proxy_set_header Connection "upgrade";',
-        "    }",
-      ]
-    : [
-        "    location / {",
-        "        try_files $uri $uri/ /index.php?$query_string;",
-        "    }",
-        ...(php
-          ? [
-              "",
-              "    location ~ \\.php$ {",
-              "        try_files $uri =404;",
-              `        fastcgi_pass 127.0.0.1:${php};`,
-              "        fastcgi_index index.php;",
-              `        include "${conf(join(paths.conf("nginx"), "fastcgi_params"))}";`,
-              "        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;",
-              "        fastcgi_param PATH_INFO $fastcgi_path_info;",
-              "        fastcgi_read_timeout 300;",
-              "    }",
-            ]
-          : []),
-        "",
-        // Deny the dotfiles a document root should never serve. Cheap, and the
-        // one that matters is .env.
-        "    location ~ /\\.(?!well-known) { deny all; }",
-      ];
-
-  const common = [
-    `    server_name ${domain} www.${domain};`,
+  /** @param {boolean} forwarded @returns {string[]} */
+  const serve = (forwarded) => [
     `    root "${conf(root)}";`,
     "    index index.php index.html index.htm;",
     "    charset utf-8;",
     `    access_log "${logFile(domain, server, "access")}";`,
     `    error_log "${logFile(domain, server, "error")}";`,
     "",
-    ...location,
+    ...nginxLocations(project, php, forwarded),
   ];
+  const common = [`    server_name ${domain} www.${domain};`, ...serve(false)];
 
   // With HTTPS on, port 80 REDIRECTS rather than serving a second copy of the
   // same site. See `httpsRedirect` for why.
   const blocks = cert
     ? [
         "server {",
-        `    listen ${ports.http};`,
-        `    listen [::]:${ports.http};`,
+        `    listen ${LOOPBACK}${ports.http};`,
+        `    listen [::1]:${ports.http};`,
         `    server_name ${domain} www.${domain};`,
         `    access_log "${logFile(domain, server, "access")}";`,
         `    error_log "${logFile(domain, server, "error")}";`,
@@ -276,14 +339,14 @@ function nginxVhost({ project, domain, root, runtime, cert, server, ports }) {
         `    return 302 https://$host${httpsSuffix(ports)}$request_uri;`,
         "}",
       ]
-    : ["server {", `    listen ${ports.http};`, ...common, "}"];
+    : ["server {", `    listen ${LOOPBACK}${ports.http};`, ...common, "}"];
 
   if (cert) {
     blocks.push(
       "",
       "server {",
-      `    listen ${ports.https} ssl;`,
-      `    listen [::]:${ports.https} ssl;`,
+      `    listen ${LOOPBACK}${ports.https} ssl;`,
+      `    listen [::1]:${ports.https} ssl;`,
       "    http2 on;",
       `    ssl_certificate "${conf(cert.cert)}";`,
       `    ssl_certificate_key "${conf(cert.key)}";`,
@@ -292,17 +355,30 @@ function nginxVhost({ project, domain, root, runtime, cert, server, ports }) {
     );
   }
 
+  // The share listener SERVES, certificate or not. It has no hostname to
+  // redirect to - a phone does not resolve `shop.test`, and would not trust the
+  // local CA if it did - and it is the only port on this machine another device
+  // can reach.
+  if (share) {
+    blocks.push(
+      "",
+      "server {",
+      `    listen ${share.lan ? "" : LOOPBACK}${share.port};`,
+      ...serve(true),
+      "}",
+    );
+  }
+
   return header(domain) + blocks.join("\n") + "\n";
 }
 
 /** @param {VhostInput} input @returns {string} */
-function apacheVhost({ project, domain, root, runtime, cert, server, ports }) {
+function apacheVhost({ project, domain, root, runtime, cert, server, ports, share }) {
   const php = runtime.php ? fastcgiPort(runtime.php) : null;
   const isProxy = project.kind === "proxy" && project.proxyPort;
 
+  const names = [`    ServerName ${domain}`, `    ServerAlias www.${domain}`];
   const body = [
-    `    ServerName ${domain}`,
-    `    ServerAlias www.${domain}`,
     `    DocumentRoot "${conf(root)}"`,
     // Static names FIRST. `ProxyPassMatch` proxies `.php` whether or not the file
     // exists, so mod_dir treats `index.php` as a valid index for a directory that
@@ -363,17 +439,34 @@ function apacheVhost({ project, domain, root, runtime, cert, server, ports }) {
         `    RewriteRule ^/?(.*)$ https://%{SERVER_NAME}${httpsSuffix(ports)}/$1 [R=302,L,QSA]`,
         "</VirtualHost>",
       ]
-    : [`<VirtualHost *:${ports.http}>`, ...body, "</VirtualHost>"];
+    : [`<VirtualHost *:${ports.http}>`, ...names, ...body, "</VirtualHost>"];
 
   if (cert) {
     blocks.push(
       "",
       `<VirtualHost *:${ports.https}>`,
+      ...names,
       ...body,
       "",
       "    SSLEngine on",
       `    SSLCertificateFile "${conf(cert.cert)}"`,
       `    SSLCertificateKeyFile "${conf(cert.key)}"`,
+      "</VirtualHost>",
+    );
+  }
+
+  // Serves with no name and no redirect, for the reasons on the nginx side.
+  // Which interface it binds is the `Listen` line in `apacheMain`; a
+  // `VirtualHost *:<port>` matches either. mod_proxy_fcgi hands the backend the
+  // request's environment, so the SetEnvIf is what PHP reads as HTTPS behind a
+  // tunnel.
+  if (share) {
+    blocks.push(
+      "",
+      `<VirtualHost *:${share.port}>`,
+      ...body,
+      "",
+      '    SetEnvIf X-Forwarded-Proto "^https$" HTTPS=on',
       "</VirtualHost>",
     );
   }
@@ -512,6 +605,11 @@ function nginxMain(confDir, ports) {
     "    client_max_body_size 256m;",
     `    access_log  "${conf(join(paths.logs(), "nginx.access.log"))}";`,
     "",
+    // What a share listener tells PHP and a proxied dev server about the
+    // scheme. See `nginxLocations`.
+    "    map $http_x_forwarded_proto $tedi_forwarded_proto { default $scheme; https https; }",
+    '    map $http_x_forwarded_proto $tedi_forwarded_https { default ""; https on; }',
+    "",
     `    include "${conf(paths.vhosts("nginx"))}/*.conf";`,
     "}",
     "",
@@ -523,9 +621,11 @@ function nginxMain(confDir, ports) {
  *
  * @param {import("./serverroot.js").ApachePaths} ap
  * @param {{ http: number, https: number }} ports
+ * @param {number[]} sharePorts  One per shared project.
+ * @param {boolean} lan  Whether those bind beyond this machine.
  * @returns {string}
  */
-function apacheMain(ap, ports) {
+function apacheMain(ap, ports, sharePorts, lan) {
   return [
     "# Generated by the TEDI Dev Environment extension.",
     // ServerRoot must be a real directory that Apache can resolve its own
@@ -537,8 +637,10 @@ function apacheMain(ap, ports) {
     `DefaultRuntimeDir "${conf(paths.run())}"`,
     `PidFile "${conf(join(paths.run(), "httpd.pid"))}"`,
     `ErrorLog "${conf(join(paths.logs(), "apache.error.log"))}"`,
-    `Listen ${ports.http}`,
-    ...(config.autoHttps ? [`Listen ${ports.https}`] : []),
+    // Loopback, for the reason on `LOOPBACK`.
+    `Listen ${LOOPBACK}${ports.http}`,
+    ...(config.autoHttps ? [`Listen ${LOOPBACK}${ports.https}`] : []),
+    ...sharePorts.map((port) => `Listen ${lan ? "" : LOOPBACK}${port}`),
     "",
     "# Only the modules the generated vhosts use, and only the ones this build",
     "# actually ships. See serverroot.js: a LoadModule naming a file that is not",

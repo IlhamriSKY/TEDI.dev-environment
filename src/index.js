@@ -37,6 +37,7 @@ import { seedDefaults } from "./manager/defaults.js";
 import { mountDashboard } from "./ui/dashboard.js";
 import { registerAiTools } from "./ai.js";
 import { clearIconCache } from "./ui/el.js";
+import { refreshTunnels, stopTunnels } from "./web/share.js";
 
 /** @typedef {import("../tedi").ExtensionContext} ExtensionContext */
 
@@ -243,6 +244,7 @@ export async function activate(context) {
     if (!state.active || state.views.size === 0) return;
     void (async () => {
       await refreshStatuses();
+      await refreshTunnels();
       const signature = statusSignature();
       if (signature === lastSignature) return;
       lastSignature = signature;
@@ -267,6 +269,9 @@ export async function deactivate() {
   // being killed before it could signal the master. What survived was the pool
   // of workers still holding port 80 - the failure `services.stop()` performs
   // the graceful stop to prevent in the first place.
+  // Public links first: one pointing at a server that is going away answers
+  // with Cloudflare's error page to whoever the link was sent to.
+  await stopTunnels().catch(() => {});
   await stopAll().catch((err) => warn("could not stop every service", err));
 
   // Latch last: every loop and every late async callback checks this, and one

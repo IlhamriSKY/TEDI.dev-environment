@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.1.40
+
+- **Share your projects with the local network, or switch it off.** A new
+  Sharing section has one switch. Off, the default, every server listens on
+  `127.0.0.1` only and nothing else on the network can reach a site. On, each
+  project also answers at `http://<this machine>:<port>`, shown under the
+  project, so a phone or a laptop on the same Wi-Fi can open it. The port is
+  given once, from 8100, and kept on the project, so an address opened on a
+  phone still works tomorrow. The share listener serves plain http with no
+  hostname and no redirect, because another device resolves no `.test` name
+  and trusts no local CA. On Windows, turning it on asks once to let the web
+  server through the firewall: it adds a program allow rule and switches OFF
+  (never deletes) any inbound block rule for the same executable, because in
+  the Windows firewall a block beats an allow. Databases and phpMyAdmin are
+  never shared. See [share.js](src/web/share.js).
+- **A public link for any project, through a Cloudflare quick tunnel.** "Share
+  publicly" in a project's menu gives it a temporary
+  `https://<random>.trycloudflare.com` address: no account, nothing opened on
+  the router. cloudflared is downloaded the first time it is needed and is not
+  part of "Install everything". The link is held back until the name actually
+  answers, probed over DNS-over-HTTPS: cloudflared prints it about five seconds
+  before Cloudflare's DNS has it, and a lookup in that window is cached as a
+  failure by the OS, so an early click kept failing for a tunnel that was up.
+  PHP behind the tunnel sees `HTTPS=on`, so absolute URLs an app builds stay
+  https instead of being blocked as mixed content.
+- **Security: the web servers no longer listen on every interface.** `listen
+  80` and `Listen 80` bound all of them, so any device on the network could
+  send `Host: phpmyadmin.test` to this machine and reach a phpMyAdmin that logs
+  in as root with no password. Ports 80 and 443 now bind loopback whether
+  sharing is on or off; the network only ever gets the per-project share port.
+- **Fix: installing a single-version tool that ships as an archive** (cloudflared
+  on macOS) staged over the shared `tools/` folder, and the final rename would
+  have replaced it along with mkcert inside. It stages into `tools/<id>` now.
+
 ## 0.1.39
 
 - **The four status lights no longer breathe in lockstep.** They shared one

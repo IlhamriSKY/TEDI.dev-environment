@@ -135,6 +135,24 @@ Highest wins:
 The decision is written to `.tedi-runtime` in the project folder, which is what
 the shims read. Add it to your `.gitignore`.
 
+## Sharing
+
+**Local network** is one switch in the Sharing section. Off (the default), every
+server listens on `127.0.0.1` only, so nothing else on the network can reach your
+sites. On, each project also answers at `http://<this machine>:<port>`, shown
+under the project, so a phone or a teammate on the same Wi-Fi can open it. The
+port is given once (from 8100) and kept, so a bookmark still works tomorrow. On
+Windows, turning it on asks once to let the web server through the firewall.
+Databases and phpMyAdmin are never shared: their accounts are passwordless.
+
+**Public link** is per project: **Share publicly** in the project's menu. It
+starts a [Cloudflare quick tunnel](https://try.cloudflare.com), which needs no
+account and opens nothing on your router, and gives the project a temporary
+`https://<random>.trycloudflare.com` address. cloudflared is downloaded the
+first time you ask. The address is new every time and closes when you stop it
+or quit TEDI. PHP sees the request as https, so absolute URLs an app builds stay
+https.
+
 ## Scheduled jobs
 
 A cron of your own, behind **Jobs** on the Cron row in Services. It runs while

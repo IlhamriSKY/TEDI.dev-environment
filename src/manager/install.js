@@ -75,7 +75,15 @@ export async function install(p, version, onProgress) {
     );
   }
 
-  const target = installRoot(p, version);
+  // A single-version tool that arrives as an ARCHIVE (cloudflared on macOS)
+  // stages into a folder of its own. `installRoot` for such a tool is the
+  // shared `tools/` directory, and the rename at the end is delete-then-rename:
+  // left alone, it would replace `tools/` and everything else in it with this
+  // one archive's contents.
+  const target =
+    p.kind === "tool" && !p.multiVersion && isArchive(dl.file)
+      ? join(paths.tools(), p.id)
+      : installRoot(p, version);
   const staging = `${target}.staging-${Date.now()}`;
   const archivePath = join(paths.downloads(), dl.file);
 

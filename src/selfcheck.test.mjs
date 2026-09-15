@@ -32,7 +32,14 @@ import { pendingDefaults, SEED_GENERATION } from "./manager/phpext.js";
 import { compareVersions, majorMinor, isPrerelease } from "./registry/util.js";
 import { versionSatisfies } from "./project/resolve.js";
 import { slug, hostname, domainOf } from "./project/projects.js";
-import { fastcgiPort, renderVhost } from "./web/vhost.js";
+import { fastcgiPort, renderVhost, isShared } from "./web/vhost.js";
+import {
+  parseWindowsRoutes,
+  parseIpRouteGet,
+  parseTunnelUrl,
+  firewallScript,
+} from "./web/share.js";
+import { cloudflaredAsset } from "./registry/cloudflared.js";
 import { offeredConnections } from "./manager/handoff.js";
 import { releaseDate } from "./ui/version-picker.js";
 import { serverIcon } from "./ui/server-icon.js";
@@ -836,6 +843,164 @@ for (const server of ["nginx", "apache"]) {
   });
 }
 
+console.log("\nsharing: off means this machine only, on means one port per project");
+
+{
+  const base = {
+    project: { id: "p", name: "shop", kind: "php", enabled: true },
+    domain: "shop.test",
+    root: "/srv/shop",
+    runtime: { php: "8.3.33" },
+    ports: { http: 80, https: 443 },
+    cert: { cert: "/c/shop.pem", key: "/c/shop-key.pem" },
+  };
+  /** Everything from the share listener on. */
+  const sharePart = (out, port) => out.slice(out.lastIndexOf(String(port)) - 40);
+
+  test("nginx: no main listener binds beyond loopback, shared or not", () => {
+    // `listen 80` bound every interface, so any device on the network could
+    // ask for `Host: phpmyadmin.test` and log in as a passwordless root.
+    for (const share of [null, { port: 8101, lan: true }]) {
+      for (const cert of [base.cert, null]) {
+        const out = renderVhost({ ...base, server: "nginx", cert, share });
+        assert.ok(!/listen (80|443)\b/.test(out), "a bare port binds every interface");
+        assert.ok(!out.includes("[::]:"), "the IPv6 wildcard binds every interface too");
+        assert.match(out, /listen 127\.0\.0\.1:80;/);
+      }
+    }
+  });
+
+  for (const server of ["nginx", "apache"]) {
+    test(`${server}: the share listener serves, with a certificate and without`, () => {
+      for (const cert of [base.cert, null]) {
+        const out = renderVhost({ ...base, server, cert, share: { port: 8101, lan: true } });
+        const part = sharePart(out, 8101);
+        assert.ok(part.includes("/srv/shop"), "it must serve the files");
+        assert.ok(!/\b30[12]\b/.test(part), "a phone has no shop.test to be redirected to");
+        assert.ok(!/server_name|ServerName/.test(part), "it answers whatever Host it is sent");
+      }
+    });
+
+    test(`${server}: behind a tunnel, PHP is told the request was https`, () => {
+      const part = sharePart(
+        renderVhost({ ...base, server, cert: null, share: { port: 8101, lan: false } }),
+        8101,
+      );
+      // Otherwise every absolute URL the app builds is http:// inside an https
+      // page, and the browser blocks the stylesheets as mixed content.
+      assert.match(
+        part,
+        server === "nginx"
+          ? /fastcgi_param HTTPS \$tedi_forwarded_https/
+          : /SetEnvIf X-Forwarded-Proto "\^https\$" HTTPS=on/,
+      );
+    });
+  }
+
+  test("nginx: the share listener binds the network only while sharing is on", () => {
+    const on = renderVhost({
+      ...base,
+      server: "nginx",
+      cert: null,
+      share: { port: 8101, lan: true },
+    });
+    const off = renderVhost({
+      ...base,
+      server: "nginx",
+      cert: null,
+      share: { port: 8101, lan: false },
+    });
+    assert.match(on, /listen 8101;/);
+    assert.match(off, /listen 127\.0\.0\.1:8101;/);
+    assert.ok(!renderVhost({ ...base, server: "nginx", cert: null }).includes("8101"));
+  });
+
+  test("a tool is never shared, whatever the switch says", () => {
+    setConfig({ shareLan: true });
+    assert.equal(isShared({ id: "tool:phpmyadmin", name: "phpmyadmin", path: "/x" }), false);
+    assert.equal(isShared({ id: "p1", name: "shop", path: "/x", enabled: false }), false);
+    assert.equal(isShared({ id: "p1", name: "shop", path: "/x" }), true);
+    setConfig({ shareLan: false });
+    assert.equal(isShared({ id: "p1", name: "shop", path: "/x" }), false);
+    // A public link needs the listener even with the network closed.
+    state.tunnels.set("p1", { handle: 1, url: null, error: null });
+    assert.equal(isShared({ id: "p1", name: "shop", path: "/x" }), true);
+    state.tunnels.clear();
+  });
+
+  test("the network address is the default route's, from route print", () => {
+    // Captured from a real Windows 11 machine with a Sophos TAP, a Wi-Fi Direct
+    // adapter and Teredo installed: only the active default route counts.
+    const real = [
+      "IPv4 Route Table",
+      "===========================================================================",
+      "Active Routes:",
+      "Network Destination        Netmask          Gateway       Interface  Metric",
+      "          0.0.0.0          0.0.0.0    10.10.222.254    10.10.222.251    281",
+      "===========================================================================",
+      "Persistent Routes:",
+      "  Network Address          Netmask  Gateway Address  Metric",
+      "          0.0.0.0          0.0.0.0    10.10.222.254  Default ",
+    ].join("\r\n");
+    assert.deepEqual(parseWindowsRoutes(real), ["10.10.222.251"]);
+    const two = [
+      "          0.0.0.0          0.0.0.0    192.168.1.1    192.168.1.20     35",
+      "          0.0.0.0          0.0.0.0    Auf Verbindung    10.0.0.7     25",
+      "          0.0.0.0          0.0.0.0    On-link    169.254.3.4     5",
+    ].join("\n");
+    assert.deepEqual(
+      parseWindowsRoutes(two),
+      ["10.0.0.7", "192.168.1.20"],
+      "lowest metric first, no link-local",
+    );
+    assert.deepEqual(
+      parseIpRouteGet("1.1.1.1 via 192.168.1.1 dev wlan0 src 192.168.1.10 uid 1000\n"),
+      ["192.168.1.10"],
+    );
+    assert.deepEqual(parseIpRouteGet("RTNETLINK answers: Network is unreachable"), []);
+  });
+
+  test("the tunnel address is read from cloudflared's log, never its API host", () => {
+    const ok =
+      "2026-09-15T01:44:50Z INF |  https://jeans-exhibitions-remix-centuries.trycloudflare.com                               |";
+    assert.equal(parseTunnelUrl(ok), "https://jeans-exhibitions-remix-centuries.trycloudflare.com");
+    // What the log says when asking for a tunnel FAILED.
+    const failed =
+      'ERR Error unmarshaling QuickTunnel response: failed to request quick Tunnel: Post "https://api.trycloudflare.com/tunnel": dial tcp: i/o timeout';
+    assert.equal(parseTunnelUrl(failed), null);
+  });
+
+  test("cloudflared downloads the plain binary, not the .deb or the FIPS build beside it", () => {
+    const cases = [
+      ["windows", "x86_64", "cloudflared-windows-amd64.exe"],
+      ["windows", "aarch64", "cloudflared-windows-amd64.exe"],
+      ["linux", "x86_64", "cloudflared-linux-amd64"],
+      ["linux", "aarch64", "cloudflared-linux-arm64"],
+      ["macos", "aarch64", "cloudflared-darwin-arm64.tgz"],
+    ];
+    for (const [platform, arch, want] of cases) {
+      setCtx(/** @type {any} */ ({ os: { platform, arch } }));
+      assert.equal(cloudflaredAsset(), want, `${platform}/${arch}`);
+    }
+    setCtx(null);
+  });
+
+  test("the firewall script quotes paths and disables a block rule rather than deleting it", () => {
+    const lines = firewallScript(["D:\\Bob's DEV\\servers\\nginx\\1.31.5\\nginx.exe"]);
+    const script = lines.join("\n");
+    assert.ok(
+      script.includes("'D:\\Bob''s DEV\\servers\\nginx\\1.31.5\\nginx.exe'"),
+      "a quote in the path must be doubled",
+    );
+    assert.match(script, /Action -eq 'Block' \} \| Set-NetFirewallRule -Enabled False/);
+    assert.ok(
+      !/Block.*Remove-NetFirewallRule/.test(script),
+      "a user's own block rule is not destroyed",
+    );
+    assert.match(script, /New-NetFirewallRule .*-Action Allow -Program \$exe/);
+  });
+}
+
 test("the elevated hosts write cannot be ended early by the file it carries", () => {
   // The content is handed to a ROOT shell as a quoted heredoc. A line equal to
   // the terminator ends it, and everything after it becomes commands.
@@ -1520,9 +1685,11 @@ test("each light sits on its own service, in the documented seat", () => {
     "--foreground": "#808080",
   };
   globalThis.document = /** @type {never} */ ({ body: {} });
-  globalThis.getComputedStyle = /** @type {never} */ (() => ({
-    getPropertyValue: (/** @type {string} */ name) => TOKENS[name] ?? "",
-  }));
+  globalThis.getComputedStyle = /** @type {never} */ (
+    () => ({
+      getPropertyValue: (/** @type {string} */ name) => TOKENS[name] ?? "",
+    })
+  );
 
   // Redis down, MySQL up, the other two seats dark - one of every state, so a
   // seat that answers with its neighbour's colour cannot hide behind a case
@@ -1583,8 +1750,14 @@ test("both web servers share the top-left seat, and a failure wins it", () => {
   // take the port off it.
   const lit = (/** @type {(ids: string[]) => "on" | "error" | "off"} */ stateOf) =>
     decodeURIComponent(serverIcon(stateOf)).match(/cx="6" cy="6" r="1" fill="([^"]+)"/)?.[1];
-  assert.equal(lit((ids) => (ids.includes("apache") ? "error" : "on")), "#ff0000");
-  assert.equal(lit((ids) => (ids.includes("nginx") ? "on" : "off")), "#00ff00");
+  assert.equal(
+    lit((ids) => (ids.includes("apache") ? "error" : "on")),
+    "#ff0000",
+  );
+  assert.equal(
+    lit((ids) => (ids.includes("nginx") ? "on" : "off")),
+    "#00ff00",
+  );
 });
 
 rmSync(tmp, { recursive: true, force: true });

@@ -16,6 +16,7 @@ import { h, button, muted, section, row, pill, icon, status, progress } from "./
 import { runtimesView } from "./runtimes-view.js";
 import { servicesView } from "./services-view.js";
 import { projectsView } from "./projects-view.js";
+import { shareView } from "./share-view.js";
 import { openSettings } from "./settings-view.js";
 import { state, config, ctx } from "../runtime.js";
 import { paths, layoutDirs } from "../core/paths.js";
@@ -114,9 +115,11 @@ async function paint(root, refresh, current) {
 
   // Projects reads every project's config to resolve its runtime, so it is
   // appended when it resolves rather than holding the whole panel blank.
-  const projects = await projectsView(refresh);
+  // Sharing likewise asks the routing table, so both resolve before either is
+  // appended: appended one at a time they would swap places on a slow probe.
+  const [sharing, projects] = await Promise.all([shareView(refresh), projectsView(refresh)]);
   if (!current()) return;
-  root.append(projects);
+  root.append(sharing, projects);
 }
 
 /**

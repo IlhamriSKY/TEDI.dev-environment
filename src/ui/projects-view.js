@@ -35,6 +35,7 @@ import { paths, join } from "../core/paths.js";
 import { openFolder } from "../core/proc.js";
 import { mkdirp, exists } from "../core/fsx.js";
 import { publish, republish } from "../web/publish.js";
+import { lanAddresses, lanUrl, startTunnel, stopTunnel } from "../web/share.js";
 import { state, config, ctx } from "../runtime.js";
 
 /** @typedef {import("../runtime.js").Project} Project */
@@ -58,10 +59,11 @@ let query = "";
  * @returns {Promise<HTMLElement>}
  */
 export async function projectsView(refresh) {
+  const [ip] = config.shareLan ? await lanAddresses() : [];
   /** @type {HTMLElement[]} */
   const rows = [];
   for (const project of state.projects) {
-    rows.push(await projectRow(project, refresh));
+    rows.push(await projectRow(project, refresh, ip));
   }
 
   // Hiding rows rather than rebuilding the list, because building one costs a
@@ -129,9 +131,10 @@ export async function projectsView(refresh) {
 
 /**
  * @param {Project} project @param {() => void} refresh
+ * @param {string} [ip] This machine's network address, while sharing is on.
  * @returns {Promise<HTMLElement>}
  */
-async function projectRow(project, refresh) {
+async function projectRow(project, refresh, ip) {
   // ONE resolve, not two. `resolveProject` already calls `readRequests` and
   // returns the very `sources` object it produced, so asking for it again
   // re-read `.nvmrc`, `.node-version` and `composer.json` for every project on
@@ -140,6 +143,10 @@ async function projectRow(project, refresh) {
   const resolved = await resolveProject(project);
   const enabled = project.enabled !== false;
   const url = projectUrl(project);
+  // The port is assigned by the publish that turned sharing on, so a project
+  // added a moment ago can briefly have none; the row just omits the line.
+  const lan = lanUrl(project, ip);
+  const tunnel = state.tunnels.get(project.id);
 
   const left = h(
     "div",
@@ -165,6 +172,16 @@ async function projectRow(project, refresh) {
           attrs: { href: url, target: "_blank", rel: "noreferrer" },
           style: "color:var(--muted-foreground);font-size:10.5px;text-decoration:none",
         }),
+        lan ? shareLink("lucide:Wifi", lan, "Open from any device on this network") : null,
+        tunnel
+          ? tunnel.url
+            ? shareLink(
+                "lucide:Globe",
+                tunnel.url,
+                "Public link: anyone with it can open this project",
+              )
+            : muted("Opening a public link…")
+          : null,
       ]),
     ],
   );
@@ -211,6 +228,29 @@ async function projectRow(project, refresh) {
                   onClick: () => void openProjectTerminal(project),
                 }
               : null,
+            lan
+              ? {
+                  label: "Copy network address",
+                  icon: "lucide:Wifi",
+                  onClick: () => void copy(lan),
+                }
+              : null,
+            tunnel?.url
+              ? {
+                  label: "Copy public link",
+                  icon: "lucide:Copy",
+                  onClick: () => void copy(tunnel.url ?? ""),
+                }
+              : null,
+            {
+              label: tunnel ? "Stop public link" : "Share publicly",
+              icon: tunnel ? "lucide:GlobeLock" : "lucide:Globe",
+              disabled: !enabled,
+              onClick: () => {
+                if (tunnel) void stopTunnel(project.id).then(refresh);
+                else void startTunnel(project);
+              },
+            },
             {
               label: enabled ? "Disable" : "Enable",
               icon: enabled ? "lucide:PowerOff" : "lucide:Power",
@@ -246,6 +286,32 @@ async function projectRow(project, refresh) {
   );
 
   return row([left, middle, right]);
+}
+
+/**
+ * A second address under the domain, with the glyph that says who can use it.
+ *
+ * @param {string} glyph @param {string} url @param {string} title
+ * @returns {HTMLElement}
+ */
+function shareLink(glyph, url, title) {
+  return h("span", { style: "display:inline-flex;align-items:center;gap:4px;min-width:0" }, [
+    icon(glyph, "var(--primary)", 11),
+    h("a", {
+      text: url,
+      title,
+      attrs: { href: url, target: "_blank", rel: "noreferrer" },
+      style:
+        "color:var(--primary);font-size:10.5px;text-decoration:none;overflow:hidden;" +
+        "text-overflow:ellipsis;white-space:nowrap",
+    }),
+  ]);
+}
+
+/** @param {string} text @returns {Promise<void>} */
+async function copy(text) {
+  await navigator.clipboard.writeText(text).catch(() => {});
+  ctx?.ui.toast(`Copied ${text}`, { variant: "success" });
 }
 
 /**

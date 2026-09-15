@@ -15,6 +15,7 @@ import { readJson, writeJson, readDir, isDir } from "../core/fsx.js";
 import { config, state } from "../runtime.js";
 import { writeProjectRuntime, clearProjectRuntime } from "./resolve.js";
 import { forgetCertificate } from "../web/certs.js";
+import { findFree } from "../web/ports.js";
 
 /** @typedef {import("../runtime.js").Project} Project */
 
@@ -242,6 +243,36 @@ export async function discoverProjects(parent) {
     out.push({ name: entry.name, path });
   }
   return out;
+}
+
+/** Where share ports start: clear of 80xx, which `artisan serve`, webpack and
+ *  half the dev servers on a machine already reach for. */
+const SHARE_PORT_BASE = 8100;
+
+/**
+ * Give each listed project a share port if it has none, and keep it.
+ *
+ * Stored on the project rather than derived from its name, because a derived
+ * number collides and a collision would be two projects on one listener. Once
+ * given it never moves, so an address bookmarked on a phone keeps working.
+ *
+ * @param {Project[]} list @returns {Promise<void>}
+ */
+export async function assignSharePorts(list) {
+  const missing = list.filter((p) => !p.sharePort);
+  if (missing.length === 0) return;
+  const taken = new Set([
+    ...state.projects.map((p) => p.sharePort).filter((p) => typeof p === "number"),
+    config.httpPort,
+    config.httpsPort,
+    ...Object.values(config.ports),
+  ]);
+  for (const project of missing) {
+    const port = await findFree(SHARE_PORT_BASE, { reserved: taken, limit: 1000 });
+    taken.add(port);
+    project.sharePort = port;
+  }
+  await saveProjects();
 }
 
 /** Rewrite `.tedi-runtime` for every project. Called after a global version
