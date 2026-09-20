@@ -19,6 +19,8 @@ import {
   confirm,
   modal,
   textInput,
+  toggle,
+  settingRow,
   actionsMenu,
 } from "./el.js";
 import {
@@ -33,7 +35,8 @@ import { resolveProject } from "../project/resolve.js";
 import { installedOf } from "../manager/versions.js";
 import { paths, join } from "../core/paths.js";
 import { openFolder } from "../core/proc.js";
-import { mkdirp, exists } from "../core/fsx.js";
+import { mkdirp, exists, readText } from "../core/fsx.js";
+import { backupProject, parseEnvDb, HEAVY } from "../manager/backup.js";
 import { publish, republish } from "../web/publish.js";
 import { lanAddresses, lanUrl, startTunnel, stopTunnel } from "../web/share.js";
 import { state, config, ctx, loudBusy } from "../runtime.js";
@@ -228,6 +231,11 @@ async function projectRow(project, refresh, ip) {
                   onClick: () => void openProjectTerminal(project),
                 }
               : null,
+            {
+              label: "Back up…",
+              icon: "lucide:Archive",
+              onClick: () => void openBackup(project),
+            },
             lan
               ? {
                   label: "Copy network address",
@@ -416,6 +424,105 @@ async function openProjectTerminal(project) {
     return;
   }
   ctx?.tabs?.openTerminal?.({ cwd: project.path });
+}
+
+/**
+ * Back up a project: its folder, and the database it uses, in one zip.
+ *
+ * The database fields are PREFILLED from the project's `.env` and then left
+ * editable, rather than shown as a detected fact you cannot argue with. That
+ * one decision is what makes this work for the projects with no `.env` at all -
+ * a WordPress install names its database in `wp-config.php`, an older app in a
+ * PHP constant - without this file growing a parser per framework. Blank means
+ * the files only.
+ *
+ * The dialog stays open while it runs, because the two steps have very
+ * different lengths and the one people wait on ("Compressing") says nothing
+ * about a database that failed to dump a minute earlier.
+ *
+ * @param {Project} project
+ * @returns {Promise<void>}
+ */
+async function openBackup(project) {
+  if (!(await exists(project.path))) {
+    ctx?.ui.toast(`${project.path} is not there any more.`, { variant: "error" });
+    return;
+  }
+  const found = parseEnvDb(await readText(join(project.path, ".env")));
+  let service = found?.service ?? "mysql";
+
+  const database = textInput("none");
+  database.value = found?.database ?? "";
+  database.style.width = "140px";
+  const driver = dropdown(
+    [
+      { value: "mysql", label: "MySQL" },
+      { value: "postgres", label: "PostgreSQL" },
+    ],
+    service,
+    (value) => {
+      service = /** @type {"mysql"|"postgres"} */ (value);
+    },
+    { width: "118px" },
+  );
+  const skip = toggle(true);
+  const step = muted("");
+
+  const dialog = modal({
+    title: `Back up ${project.name}`,
+    description: `One zip in ${paths.backups()}, with the database dumped inside it.`,
+    body: h("div", { style: "display:flex;flex-direction:column;gap:2px" }, [
+      settingRow(
+        "Database",
+        found
+          ? `Read from ${project.name}/.env. Blank backs up the files only.`
+          : "Blank backs up the files only.",
+        h("div", { style: "display:flex;align-items:center;gap:5px" }, [driver, database]),
+      ),
+      settingRow(
+        `Skip ${HEAVY.join(" and ")}`,
+        "npm install and composer install put them back.",
+        skip.el,
+      ),
+      step,
+    ]),
+    footer: h("div", { style: "display:flex;gap:8px;justify-content:flex-end" }, [
+      button("Cancel", () => dialog.close()),
+      button(
+        "Back up",
+        async () => {
+          const name = database.value.trim();
+          try {
+            const out = await backupProject(project, {
+              db: name
+                ? {
+                    service,
+                    database: name,
+                    // The `.env` credentials belong to the driver `.env` named.
+                    // Handing a MySQL user to pg_dump fails on authentication
+                    // and reads as the backup being broken, so a driver the
+                    // user changed falls back to that service's own superuser.
+                    user: found?.service === service ? found.user : "",
+                    password: found?.service === service ? found.password : "",
+                  }
+                : null,
+              skipHeavy: skip.on(),
+              onStep: (text) => {
+                step.textContent = text;
+              },
+            });
+            dialog.close();
+            ctx?.ui.toast(`Backed up to ${out}`, { variant: "success" });
+          } catch (err) {
+            step.textContent = "";
+            ctx?.ui.toast(err instanceof Error ? err.message : String(err), { variant: "error" });
+          }
+        },
+        { variant: "primary", icon: "lucide:Archive" },
+      ),
+    ]),
+    width: "min(30rem,100%)",
+  });
 }
 
 /**

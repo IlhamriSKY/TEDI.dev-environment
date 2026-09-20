@@ -153,3 +153,90 @@ export function plan(archive, destDir = "<dest>") {
 export function canExtract(archive) {
   return isZip(archive) || isTarball(archive);
 }
+
+/**
+ * Build one archive OUT of a directory.
+ *
+ * The mirror of `plan`, with one trap that reading has and writing does not:
+ * GNU tar cannot WRITE a zip and does not say so. `tar -a -cf out.zip dir`
+ * exits 0 on GNU tar and leaves a TAR file with a `.zip` name, which every unzip
+ * tool then refuses - a corrupt backup that reported success. So no attempt
+ * here is allowed to reach a bare `tar` on a platform where PATH may hand back
+ * GNU tar, which is Windows (Git Bash, MSYS) and Linux (always).
+ *
+ * The directory's own NAME becomes the single top-level entry, so extracting
+ * gives back a folder rather than spraying a project over the download
+ * directory. Every attempt therefore runs with the PARENT as cwd and names the
+ * folder relatively, which also keeps a drive letter out of the arguments.
+ *
+ * @param {string} name       Folder to pack, relative to its parent.
+ * @param {string} out        Absolute path of the `.zip` to write.
+ * @param {string[]} [exclude] Names dropped anywhere in the tree, e.g. `node_modules`.
+ * @returns {[string, string[]][]}
+ */
+export function packPlan(name, out, exclude = []) {
+  // libarchive matches a pattern with no slash against any path COMPONENT, so
+  // a bare `node_modules` drops the folder wherever it sits. `zip` matches the
+  // whole path, so it gets a glob.
+  const bsdtar = [...exclude.map((e) => `--exclude=${e}`), "-a", "-c", "-f", out, name];
+  const zip = ["-r", "-q", out, name, ...exclude.flatMap((e) => ["-x", `${name}/${e}/*`])];
+
+  if (isWindows()) {
+    return [
+      [systemTar(), bsdtar],
+      // Compress-Archive is the guaranteed floor rather than a good option: it
+      // is slow, it refuses files over 2 GB, and it has no exclusion syntax at
+      // all, so a fallback backup is the WHOLE folder. Reached only on a
+      // Windows without System32\tar.exe, which is pre-1803.
+      [
+        "powershell",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `Compress-Archive -LiteralPath '${name.replace(/'/g, "''")}' ` +
+            `-DestinationPath '${out.replace(/'/g, "''")}' -Force`,
+        ],
+      ],
+    ];
+  }
+  // macOS ships bsdtar as the only tar, so `-a` picks the zip format from the
+  // suffix there exactly as it does on Windows.
+  if (isMac()) return [["tar", bsdtar]];
+  return [
+    ["zip", zip],
+    // Some distributions ship libarchive's tar under its own name. If neither
+    // is there the backup fails loudly, which is the only honest answer: a
+    // silent tar-in-a-zip is the bug this chain exists to avoid.
+    ["bsdtar", bsdtar],
+  ];
+}
+
+/**
+ * Pack `dir` into the zip at `out`, creating its parent directory.
+ *
+ * @param {string} dir Absolute directory to pack.
+ * @param {string} out Absolute `.zip` path to write.
+ * @param {{ exclude?: string[], timeoutMs?: number }} [opts]
+ * @returns {Promise<void>}
+ */
+export async function pack(dir, out, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 30 * 60_000;
+  await mkdirp(out.replace(/[\/][^\/]*$/, ""));
+  const parent = dir.replace(/[\/][^\/]*$/, "");
+  const name = dir.slice(parent.length + 1) || dir;
+
+  /** @type {Error | null} */
+  let lastErr = null;
+  for (const [program, args] of packPlan(name, out, opts.exclude)) {
+    try {
+      const res = await run(program, args, { timeoutMs, cwd: parent });
+      if (res.code === 0) return;
+      const tail = res.out.trim().split(/\r?\n/).slice(-3).join(" ");
+      lastErr = new Error(`${program} exited ${res.code}${tail ? `: ${tail}` : ""}`);
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+  throw new Error(`Could not write ${out}. (${lastErr?.message ?? "no archiver"})`);
+}

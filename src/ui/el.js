@@ -651,11 +651,25 @@ export function actionsMenu(items, opts = {}) {
   btn.addEventListener("click", (ev) => {
     ev.stopPropagation();
     if (panel) return close();
+    // UPWARDS, unless there is not enough room above the button for the panel.
+    // Opening downwards put the items below the fold on every row past the
+    // middle of a list, so pressing one meant scrolling first - and scrolling
+    // moves the row you were aiming at.
+    //
+    // The room is measured to the nearest CLIPPING ancestor, not to the top of
+    // the window: the pane is a scroll container inside a tab, so a panel that
+    // fits on screen can still be cut in half by the box it lives in. The
+    // panel's height is estimated from the item count rather than measured,
+    // because measuring needs it in the document first and a menu that flips
+    // after it is visible is worse than one that is occasionally four pixels
+    // out.
+    const needed = live.length * 27 + 8;
+    const up = btn.getBoundingClientRect().top - clipTop(btn) > needed + 8;
     panel = h(
       "div",
       {
         style:
-          "position:absolute;top:calc(100% + 4px);right:0;z-index:40;min-width:170px;" +
+          `position:absolute;${up ? "bottom" : "top"}:calc(100% + 4px);right:0;z-index:40;min-width:170px;` +
           "padding:4px;border-radius:var(--radius, 8px);border:1px solid var(--border);" +
           "background:var(--popover, var(--background));box-shadow:0 10px 30px rgba(0,0,0,.35)",
       },
@@ -752,6 +766,49 @@ export function checkbox(checked, opts = {}) {
   svg.append(path);
   box.append(svg);
   return box;
+}
+
+/**
+ * Where the nearest ancestor that clips its children starts, in viewport
+ * coordinates. `0` when nothing does.
+ *
+ * @param {HTMLElement} el
+ * @returns {number}
+ */
+function clipTop(el) {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY;
+    if (overflow === "auto" || overflow === "scroll" || overflow === "hidden") {
+      return node.getBoundingClientRect().top;
+    }
+  }
+  return 0;
+}
+
+/**
+ * A checkbox that flips itself, for use inside a dialog.
+ *
+ * `checkbox` renders a STATE, not a control - it has no checked/unchecked
+ * behaviour of its own - so every caller in a LIST repaints its whole row to
+ * show a change. There is no row to repaint inside a dialog, so this keeps one
+ * wrapper in the document and swaps what is inside it.
+ *
+ * @param {boolean} initial
+ * @returns {{ el: HTMLElement, on: () => boolean }}
+ */
+export function toggle(initial) {
+  let on = initial;
+  const el = h("span", { style: "display:inline-flex" });
+  const paint = () => {
+    const box = checkbox(on);
+    box.addEventListener("click", () => {
+      on = !on;
+      paint();
+    });
+    el.replaceChildren(box);
+  };
+  paint();
+  return { el, on: () => on };
 }
 
 /**

@@ -264,7 +264,7 @@ src/
   registry/           index.js util.js php.js node.js composer.js db.js
                       redis.js servers.js mkcert.js
   manager/            install.js versions.js config.js defaults.js apply.js
-                      services.js cron.js migrate.js
+                      services.js cron.js migrate.js backup.js
                       phpini.js phpext.js xdebug.js packagers.js
   project/            projects.js resolve.js shims.js
   web/                vhost.js serverroot.js hosts.js certs.js ports.js

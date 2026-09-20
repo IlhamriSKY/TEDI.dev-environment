@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { renderHosts, MARKERS, wouldLose, heredocMarker } from "./web/hosts.js";
 import { SHIMS, windowsShim, posixShim } from "./project/shims.js";
-import { plan } from "./core/archive.js";
+import { plan, packPlan } from "./core/archive.js";
 import { setCtx, setConfig, state } from "./runtime.js";
 import { startsWithAll } from "./manager/config.js";
 import { parseNetstat, parseTasklist, parseLsof, parseSs } from "./web/portowner.js";
@@ -41,6 +41,7 @@ import {
 } from "./web/share.js";
 import { cloudflaredAsset } from "./registry/cloudflared.js";
 import { offeredConnections } from "./manager/handoff.js";
+import { parseEnvDb, dumpArgs } from "./manager/backup.js";
 import { releaseDate } from "./ui/version-picker.js";
 import { serverIcon } from "./ui/server-icon.js";
 
@@ -290,6 +291,119 @@ test("a tarball needs no decompression flag on either tar", () => {
     const [[, args]] = plan(name, "/tmp/x");
     assert.deepEqual(args.slice(0, 2), ["-xf", name], `${name} should use bare -xf`);
   }
+});
+
+console.log("\nproject backups");
+
+// The archive plan and the dump arguments are both "exits 0 and is wrong" code:
+// GNU tar writes a TAR with a .zip name and reports success, and a dump that
+// went to a ring buffer instead of a file is truncated with nothing to say so.
+
+test("no platform can reach a bare `tar` when WRITING a zip", () => {
+  for (const platform of ["windows", "macos", "linux"]) {
+    setCtx(/** @type {any} */ ({ os: { platform, arch: "x86_64" } }));
+    for (const [program] of packPlan("app", "/tmp/app.zip")) {
+      if (platform === "macos") continue; // the only tar there IS bsdtar
+      assert.notEqual(program, "tar", `${platform} would hand writing a zip to GNU tar`);
+    }
+  }
+});
+
+test("the folder's own name is the archive's single top-level entry", () => {
+  setCtx(/** @type {any} */ ({ os: { platform: "windows", arch: "x86_64" } }));
+  const [[, args]] = packPlan("app", "D:\\bk\\app.zip");
+  assert.ok(args.includes("app"), "the folder name is not in the arguments");
+  assert.equal(args[args.length - 1], "app", "the folder must be the last argument");
+});
+
+test("an exclusion reaches every archiver that supports one", () => {
+  setCtx(/** @type {any} */ ({ os: { platform: "linux", arch: "x86_64" } }));
+  const [[zipProgram, zipArgs], [tarProgram, tarArgs]] = packPlan("app", "/tmp/app.zip", [
+    "node_modules",
+  ]);
+  assert.equal(zipProgram, "zip");
+  assert.ok(
+    zipArgs.includes("app/node_modules/*"),
+    "zip matches whole paths, so a bare name excludes nothing",
+  );
+  assert.equal(tarProgram, "bsdtar");
+  assert.ok(tarArgs.includes("--exclude=node_modules"));
+});
+
+test("a dotenv file names the database, the driver and the account", () => {
+  const target = parseEnvDb(
+    [
+      "APP_NAME=Laravel",
+      "DB_CONNECTION=mysql",
+      "DB_HOST=127.0.0.1",
+      "DB_PORT=3306",
+      "DB_DATABASE=shop   # the live one",
+      'DB_USERNAME="shop_user"',
+      "DB_PASSWORD=",
+    ].join("\n"),
+  );
+  assert.ok(target);
+  assert.equal(target.service, "mysql");
+  assert.equal(target.database, "shop", "an inline comment ended up in the database name");
+  assert.equal(target.user, "shop_user", "the quotes were kept");
+  assert.equal(target.password, "");
+});
+
+test("a quoted password keeps its hash, and pgsql means PostgreSQL", () => {
+  const target = parseEnvDb('DB_CONNECTION=pgsql\nDB_DATABASE=shop\nDB_PASSWORD="a#b c"');
+  assert.ok(target);
+  assert.equal(target.service, "postgres");
+  assert.equal(target.password, "a#b c", "a # inside quotes is part of the password");
+});
+
+test("no driver, no database, or no file at all is not a target", () => {
+  assert.equal(parseEnvDb("DB_DATABASE=shop"), null, "a database with no driver is not dumpable");
+  assert.equal(
+    parseEnvDb("DB_CONNECTION=sqlite\nDB_DATABASE=x"),
+    null,
+    "sqlite is a file, not a server",
+  );
+  assert.equal(parseEnvDb(null), null);
+});
+
+test("a dump is written to a FILE, never through the log buffer", () => {
+  const mysql = dumpArgs(
+    { service: "mysql", database: "shop", user: "", password: "" },
+    3307,
+    "/t/d.sql",
+  );
+  assert.ok(mysql.includes("--result-file=/t/d.sql"), "mysqldump would print to stdout");
+  assert.ok(mysql.includes("--port=3307"), "the live port is what must be dumped");
+  assert.ok(mysql.includes("--databases"), "without --databases a restore has no CREATE DATABASE");
+  assert.ok(
+    mysql.includes("--set-gtid-purged=OFF"),
+    "a dump carrying GTID_PURGED cannot be restored into a server that has run anything",
+  );
+  assert.equal(mysql[mysql.length - 1], "shop");
+  assert.ok(
+    !mysql.some((a) => a.startsWith("--password")),
+    "an empty --password is how this client is asked to PROMPT, and there is no stdin",
+  );
+
+  const withPassword = dumpArgs(
+    { service: "mysql", database: "shop", user: "u", password: "p" },
+    3306,
+    "/t/d.sql",
+  );
+  assert.ok(withPassword.includes("--password=p"));
+  assert.ok(withPassword.includes("--user=u"));
+});
+
+test("pg_dump is told never to prompt, because a prompt would hang", () => {
+  const args = dumpArgs(
+    { service: "postgres", database: "shop", user: "", password: "" },
+    5432,
+    "/t/d.sql",
+  );
+  assert.ok(args.includes("--no-password"), "pg_dump would wait on a password nobody can type");
+  assert.ok(args.includes("--file=/t/d.sql"));
+  assert.ok(args.includes("--username=postgres"), "no user means the superuser initdb made");
+  assert.ok(args.includes("--create"));
 });
 
 console.log("\nweb servers");

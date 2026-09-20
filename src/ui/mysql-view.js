@@ -7,7 +7,7 @@ import {
   button,
   modal,
   textInput,
-  checkbox,
+  toggle,
   confirm,
   skeleton,
   pill,
@@ -182,32 +182,6 @@ function openPassword(account, reload) {
     width: "min(28rem,100%)",
   });
   password.focus();
-}
-
-/**
- * A checkbox that flips itself.
- *
- * `checkbox` renders a STATE, not a control - it has no checked/unchecked
- * behaviour of its own - so every caller elsewhere repaints its whole row to
- * show a change. There is no row to repaint inside a dialog, so this keeps one
- * wrapper in the document and swaps what is inside it.
- *
- * @param {boolean} initial
- * @returns {{ el: HTMLElement, on: () => boolean }}
- */
-function toggle(initial) {
-  let on = initial;
-  const el = h("span", { style: "display:inline-flex" });
-  const paint = () => {
-    const box = checkbox(on);
-    box.addEventListener("click", () => {
-      on = !on;
-      paint();
-    });
-    el.replaceChildren(box);
-  };
-  paint();
-  return { el, on: () => on };
 }
 
 /** `settingRow` with the input given a consistent width. Text inputs default to

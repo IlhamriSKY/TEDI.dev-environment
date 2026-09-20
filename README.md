@@ -32,6 +32,13 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
   that folder, so `php`, `node`, `npm` and `composer` in it are that project's
   versions. Needs TEDI 0.4.47 or newer; on an older one the button is simply
   not there.
+- **Back up a project with its database.** **Back up** in a project's menu
+  writes one zip into `<root>/backups/`: the project folder, with a `.sql` dump
+  of its database inside it. The database and the account are read from the
+  project's `.env` and shown for you to change, so a project that names its
+  database somewhere else (WordPress, say) takes one edit; leave the name blank
+  and you get the files only. `node_modules` and `vendor` are skipped unless you
+  say otherwise. The database has to be running to be dumped.
 - **Nginx and Apache, one at a time.** Both get installed, and the tick on the
   row picks which one your project URLs point at. Starting either stops the
   other, so there is only ever one server on the ports you configured and one
@@ -189,8 +196,8 @@ Under the root folder you picked in step 1, and nowhere else:
 ```
 <root>/www/         your projects           <root>/data/      the databases
 <root>/runtimes/    php, node, composer     <root>/logs/      what each service wrote
-<root>/servers/     nginx, apache           <root>/internal/  everything generated
-<root>/services/    mysql, postgres, redis
+<root>/servers/     nginx, apache           <root>/backups/   the zips you asked for
+<root>/services/    mysql, postgres, redis  <root>/internal/  everything generated
 ```
 
 `internal/` holds the shims, the certificates, the generated server config, the

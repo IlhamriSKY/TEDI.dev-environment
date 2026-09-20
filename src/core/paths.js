@@ -161,6 +161,21 @@ function tools() {
 }
 
 /**
+ * Project backups, one zip per press.
+ *
+ * At the ROOT, beside `www/` and `data/`, because it is a folder the user opens
+ * and copies somewhere else - which is the entire point of a backup, and is not
+ * true of anything under `internal/`.
+ *
+ * Deliberately absent from `layoutDirs`: an environment that has never made a
+ * backup should not grow an empty folder promising one. `pack` creates it on
+ * the first write.
+ */
+function backups() {
+  return join(root(), "backups");
+}
+
+/**
  * Where projects live by default.
  *
  * The whole shape of this environment is one folder you can point at, back up
@@ -265,6 +280,7 @@ export const paths = {
   serviceBase,
   data,
   tools,
+  backups,
   www,
   shims,
   certs,

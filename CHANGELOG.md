@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.42
+
+- **Back up a project, with its database, as one zip.** "Back up" in a
+  project's menu writes `backups/<project>-<date>.zip` under the environment
+  root: the project folder, with a `.sql` dump of its database inside it. The
+  database fields are filled in from the project's `.env` (`DB_CONNECTION`,
+  `DB_DATABASE` and the account) and stay editable, so a
+  WordPress or legacy project that names its database somewhere else is one
+  field away rather than one parser away; leaving the name blank backs up the
+  files only. MySQL is dumped with `mysqldump --databases --set-gtid-purged=OFF`
+  and PostgreSQL with `pg_dump --create`, both writing to a file rather than
+  through the log buffer, and both aimed at the port the service is ACTUALLY
+  listening on rather than the one `.env` claims. `node_modules` and `vendor`
+  are skipped by default, since npm and composer put them back. See
+  [backup.js](src/manager/backup.js).
+- **A row's overflow menu opens upwards.** It opened downwards, so on every row
+  past the middle of the pane the items landed below the fold and reaching one
+  meant scrolling - which moved the row you were aiming at. It now opens above
+  the button whenever there is room above it, and downwards only near the top
+  of the window.
+
 ## 0.1.41
 
 - **Sharing moved into Settings.** The local network switch and the list of
@@ -46,7 +67,7 @@
   PHP behind the tunnel sees `HTTPS=on`, so absolute URLs an app builds stay
   https instead of being blocked as mixed content.
 - **Security: the web servers no longer listen on every interface.** `listen
-  80` and `Listen 80` bound all of them, so any device on the network could
+80` and `Listen 80` bound all of them, so any device on the network could
   send `Host: phpmyadmin.test` to this machine and reach a phpMyAdmin that logs
   in as root with no password. Ports 80 and 443 now bind loopback whether
   sharing is on or off; the network only ever gets the per-project share port.
