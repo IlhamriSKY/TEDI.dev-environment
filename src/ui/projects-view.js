@@ -21,6 +21,8 @@ import {
   textInput,
   toggle,
   settingRow,
+  busyLine,
+  progress,
   actionsMenu,
 } from "./el.js";
 import {
@@ -189,7 +191,7 @@ async function projectRow(project, refresh, ip) {
                 tunnel.url,
                 "Public link: anyone with it can open this project",
               )
-            : muted(publicLinkProgress())
+            : connectingLine()
           : null,
       ]),
     ],
@@ -299,7 +301,27 @@ async function projectRow(project, refresh, ip) {
     ],
   );
 
-  return row([left, middle, right]);
+  const line = row([left, middle, right]);
+  // The first public link downloads 55 MB of cloudflared, and the row said so
+  // in words only. Same shape a service row uses while it installs: the bar
+  // belongs to the row doing the work, so nothing has to name which one it is
+  // measuring. Afterwards there is nothing to count - the tunnel either dials
+  // out or does not - and `progress` with no number sweeps instead.
+  const busy = tunnel && !tunnel.url ? loudBusy("cloudflared") : null;
+  if (!tunnel || tunnel.url) return line;
+  return h("div", { style: "display:flex;flex-direction:column;min-width:0" }, [
+    line,
+    progress(busy?.pct),
+  ]);
+}
+
+/** "Opening a public link", with the glyph that says it is still happening.
+ *  @returns {HTMLElement} */
+function connectingLine() {
+  return h("span", { style: "display:inline-flex;align-items:center;gap:5px;min-width:0" }, [
+    status("working", 11),
+    muted(publicLinkProgress()),
+  ]);
 }
 
 /**
@@ -472,7 +494,7 @@ async function openBackup(project) {
     { width: "118px" },
   );
   const skip = toggle(true);
-  const step = muted("");
+  const busy = busyLine();
 
   const dialog = modal({
     title: `Back up ${project.name}`,
@@ -490,7 +512,7 @@ async function openBackup(project) {
         "npm install and composer install put them back.",
         skip.el,
       ),
-      step,
+      busy.el,
     ]),
     footer: h("div", { style: "display:flex;gap:8px;justify-content:flex-end" }, [
       button("Cancel", () => dialog.close()),
@@ -513,14 +535,13 @@ async function openBackup(project) {
                   }
                 : null,
               skipHeavy: skip.on(),
-              onStep: (text) => {
-                step.textContent = text;
-              },
+              onStep: (text) => busy.set(text),
             });
+            busy.set("");
             dialog.close();
             ctx?.ui.toast(`Backed up to ${out}`, { variant: "success" });
           } catch (err) {
-            step.textContent = "";
+            busy.set("");
             ctx?.ui.toast(err instanceof Error ? err.message : String(err), { variant: "error" });
           }
         },
@@ -549,7 +570,7 @@ async function newProject(refresh) {
 
   const field = textInput("my-app");
   const preview = muted("");
-  const step = muted("");
+  const busy = busyLine();
   const picker = dropdown(
     TEMPLATES.map((t) => ({ value: t.value, label: t.label, hint: t.hint })),
     template,
@@ -589,11 +610,10 @@ async function newProject(refresh) {
         // already known here - so a template can write it into a config file
         // before the project is registered, which is when it has to be there.
         url: projectUrl({ id: "", name, path: dir }),
-        onStep: (text) => {
-          step.textContent = text;
-        },
+        onStep: (text, pct) => busy.set(text, pct),
       });
       const project = await addProject(dir, made.docRoot ? { docRoot: made.docRoot } : {});
+      busy.set("");
       dialog.close();
       await serve([project.name], refresh);
       if (made.note) ctx?.ui.toast(made.note, { variant: "warning" });
@@ -603,7 +623,7 @@ async function newProject(refresh) {
         });
       }
     } catch (err) {
-      step.textContent = "";
+      busy.set("");
       ctx?.ui.toast(err instanceof Error ? err.message : String(err), { variant: "error" });
     }
   };
@@ -618,7 +638,7 @@ async function newProject(refresh) {
     body: h("div", { style: "display:flex;flex-direction:column;gap:6px" }, [
       h("div", { style: "display:flex;align-items:center;gap:5px" }, [field, picker]),
       preview,
-      step,
+      busy.el,
     ]),
     footer: h("div", { style: "display:flex;gap:8px;justify-content:flex-end" }, [
       button("Cancel", () => dialog.close()),

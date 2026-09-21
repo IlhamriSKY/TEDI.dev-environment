@@ -16,6 +16,7 @@
 import { isWindows, isMac } from "../runtime.js";
 import { run } from "./proc.js";
 import { mkdirp } from "./fsx.js";
+import { dirname, basename } from "./paths.js";
 
 /**
  * Windows' own bsdtar, by absolute path.
@@ -213,6 +214,25 @@ export function packPlan(name, out, exclude = []) {
 }
 
 /**
+ * Which directory to run the archiver IN, and what to call the thing it packs.
+ *
+ * Split through `paths.js` rather than with a regex here. A hand-written
+ * separator class that says `/` where it means `\` or `/` is invisible on a
+ * Mac and silently wrong on Windows: `dirname` then returns the whole path
+ * unchanged, `mkdirp` creates the ARCHIVE as a directory, and the archiver
+ * writes nothing while reporting success. That shipped once.
+ *
+ * Exported for the self-check, which is where Windows paths get exercised on a
+ * machine that may not have one.
+ *
+ * @param {string} dir Absolute directory to pack.
+ * @returns {{ parent: string, name: string }}
+ */
+export function packTarget(dir) {
+  return { parent: dirname(dir), name: basename(dir) };
+}
+
+/**
  * Pack `dir` into the zip at `out`, creating its parent directory.
  *
  * @param {string} dir Absolute directory to pack.
@@ -222,9 +242,8 @@ export function packPlan(name, out, exclude = []) {
  */
 export async function pack(dir, out, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 30 * 60_000;
-  await mkdirp(out.replace(/[\/][^\/]*$/, ""));
-  const parent = dir.replace(/[\/][^\/]*$/, "");
-  const name = dir.slice(parent.length + 1) || dir;
+  const { parent, name } = packTarget(dir);
+  await mkdirp(dirname(out));
 
   /** @type {Error | null} */
   let lastErr = null;

@@ -7,7 +7,19 @@
 // in the way. Everything about backups is behind one button on the Projects
 // header, next to the action that creates them.
 
-import { h, row, muted, button, modal, confirm, dropdown, pill, skeleton, section } from "./el.js";
+import {
+  h,
+  row,
+  muted,
+  button,
+  modal,
+  confirm,
+  dropdown,
+  pill,
+  skeleton,
+  section,
+  busyLine,
+} from "./el.js";
 import { listBackups, restoreBackup, pruneBackups } from "../manager/backup.js";
 import { setKeepBackups } from "../manager/config.js";
 import { paths, join, samePath, dirname } from "../core/paths.js";
@@ -99,8 +111,8 @@ function keepPicker(reload) {
  * @returns {HTMLElement}
  */
 function backupRow(backup, reload, refresh, dialog) {
-  const step = muted("");
-  return row([
+  const busy = busyLine();
+  const line = row([
     h("div", { style: "display:flex;flex-direction:column;gap:0;flex:1 1 auto;min-width:0" }, [
       h("span", {
         text: backup.project,
@@ -112,7 +124,6 @@ function backupRow(backup, reload, refresh, dialog) {
       muted(`${when(backup.mtime)} · ${size(backup.size)}`),
     ]),
     h("div", { style: "display:flex;align-items:center;gap:5px;flex:0 1 auto;min-width:0" }, [
-      step,
       pill(known(backup.project) ? "project" : "orphan", {
         title: known(backup.project)
           ? "This project is registered, so it restores where it already lives."
@@ -135,11 +146,9 @@ function backupRow(backup, reload, refresh, dialog) {
           try {
             const res = await restoreBackup(backup, {
               into,
-              onStep: (text) => {
-                step.textContent = text;
-              },
+              onStep: (text) => busy.set(text),
             });
-            step.textContent = "";
+            busy.set("");
             await serveRestored(backup.project, res.dir);
             refresh();
             ctx?.ui.toast(
@@ -150,7 +159,7 @@ function backupRow(backup, reload, refresh, dialog) {
             );
             dialog.close();
           } catch (err) {
-            step.textContent = "";
+            busy.set("");
             ctx?.ui.toast(err instanceof Error ? err.message : String(err), { variant: "error" });
           }
         },
@@ -171,6 +180,11 @@ function backupRow(backup, reload, refresh, dialog) {
       ),
     ]),
   ]);
+
+  // The bar goes UNDER its own row, the way a service row carries its install
+  // progress: a restore unpacks thousands of files and then waits on a database
+  // client, and inside a row there is no width for a bar that means anything.
+  return h("div", { style: "display:flex;flex-direction:column;min-width:0" }, [line, busy.el]);
 }
 
 /** Is a project by this name registered? @param {string} name @returns {boolean} */

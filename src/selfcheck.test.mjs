@@ -15,8 +15,9 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { renderHosts, MARKERS, wouldLose, heredocMarker } from "./web/hosts.js";
 import { SHIMS, windowsShim, posixShim } from "./project/shims.js";
-import { plan, packPlan } from "./core/archive.js";
+import { plan, packPlan, packTarget } from "./core/archive.js";
 import { setCtx, setConfig, state } from "./runtime.js";
+import { dirname } from "./core/paths.js";
 import { startsWithAll } from "./manager/config.js";
 import { parseNetstat, parseTasklist, parseLsof, parseSs } from "./web/portowner.js";
 import { parseAccounts, sqlString, sqlArgs } from "./manager/mysqlusers.js";
@@ -309,6 +310,27 @@ test("no platform can reach a bare `tar` when WRITING a zip", () => {
       assert.notEqual(program, "tar", `${platform} would hand writing a zip to GNU tar`);
     }
   }
+});
+
+test("a backup splits a WINDOWS path, not just a POSIX one", () => {
+  // This one shipped. `pack` split the path with a hand-written `[\/]`, which
+  // is a forward slash and nothing else, so on Windows `dirname` returned the
+  // whole path, `mkdirp` created the ARCHIVE as a directory, and the archiver
+  // wrote nothing while the toast said "Backed up to ...". Every check passed:
+  // they all used POSIX paths.
+  setCtx(/** @type {any} */ ({ os: { platform: "windows", arch: "x86_64" } }));
+  assert.deepEqual(packTarget("D:\\DEV ENV\\www\\laravel"), {
+    parent: "D:\\DEV ENV\\www",
+    name: "laravel",
+  });
+  assert.equal(
+    dirname("D:\\DEV ENV\\backups\\laravel-2026-09-20-1432.zip"),
+    "D:\\DEV ENV\\backups",
+    "the archive's own name would be created as a folder",
+  );
+
+  setCtx(/** @type {any} */ ({ os: { platform: "linux", arch: "x86_64" } }));
+  assert.deepEqual(packTarget("/srv/www/shop"), { parent: "/srv/www", name: "shop" });
 });
 
 test("the folder's own name is the archive's single top-level entry", () => {
@@ -1794,6 +1816,7 @@ test("one loading glyph, named once", () => {
     "ui/cron-view.js",
     "ui/php-view.js",
     "ui/version-picker.js",
+    "ui/backups-view.js",
   ];
   for (const file of views) {
     const src = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
@@ -1818,6 +1841,75 @@ test("every row that can be busy draws the working state", () => {
   for (const [file, needle] of sites) {
     const src = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
     assert.ok(src.includes(needle), `${file} does not show a working state; it draws idle instead`);
+  }
+});
+
+test("a job with nothing to print still says it is running", () => {
+  // Backing up, restoring and `composer create-project` all go quiet for
+  // minutes at a time. A disabled button is not an answer to "is this still
+  // going", so each of them mounts the shared busy line - one spinning glyph,
+  // the step in words, and a bar that sweeps when there is nothing to count.
+  const el = readFileSync(new URL("./ui/el.js", import.meta.url), "utf8");
+  const line = el.slice(
+    el.indexOf("export function busyLine()"),
+    el.indexOf("export function muted"),
+  );
+  assert.ok(line.length > 0, "el.js no longer has one shared busy line");
+  assert.ok(
+    line.includes('status("working")'),
+    "the busy line stopped using the one working glyph",
+  );
+  assert.ok(line.includes("progress(pct)"), "the busy line lost its progress bar");
+
+  for (const file of ["ui/projects-view.js", "ui/backups-view.js"]) {
+    const src = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+    assert.ok(src.includes("busyLine()"), `${file} runs a long job with no indicator on it`);
+  }
+  // Both of the project dialogs, not just one: they are separate call sites and
+  // the long one (Composer) is the easier to forget.
+  const projects = readFileSync(new URL("./ui/projects-view.js", import.meta.url), "utf8");
+  assert.equal(
+    (projects.match(/busyLine\(\)/g) ?? []).length,
+    2,
+    "one of Back up and New project lost its busy line",
+  );
+});
+
+test("a popup is never clipped by the thing that opened it", () => {
+  // The Keep dropdown in the Backups dialog lost its last option behind the
+  // dialog's own edge: a dialog is `overflow:hidden` and the pane is a scroll
+  // container, so an absolutely positioned list inside either one is cut off
+  // with no way to reach what it hides. Both popups go through `floatPanel`,
+  // which puts them on `document.body` at fixed coordinates.
+  const el = readFileSync(new URL("./ui/el.js", import.meta.url), "utf8");
+  const float = el.slice(
+    el.indexOf("export function floatPanel"),
+    el.indexOf("A dropdown in the app"),
+  );
+  assert.ok(
+    float.includes("document.body.append(panel)"),
+    "floatPanel no longer escapes its parent",
+  );
+  assert.ok(
+    float.includes('panel.style.position = "fixed"'),
+    "a positioned panel still scrolls with a parent",
+  );
+  assert.ok(
+    float.includes("panel.style.maxHeight"),
+    "a list longer than the window would be cut off",
+  );
+
+  for (const maker of ["export function dropdown", "export function actionsMenu"]) {
+    const body = el.slice(
+      el.indexOf(maker),
+      el.indexOf("}", el.indexOf("return wrap;", el.indexOf(maker))),
+    );
+    assert.ok(body.includes("floatPanel("), `${maker} positions its own panel again`);
+    assert.doesNotMatch(
+      body,
+      /position:absolute/,
+      `${maker} pins its panel inside a box that can clip it`,
+    );
   }
 });
 

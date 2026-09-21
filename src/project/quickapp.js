@@ -64,7 +64,8 @@ const SALT_KEYS = [
  * Fill an empty folder with a working application.
  *
  * @param {Template} template
- * @param {{ dir: string, name: string, url: string, onStep?: (text: string) => void }} ask
+ * @param {{ dir: string, name: string, url: string,
+ *           onStep?: (text: string, pct?: number) => void }} ask
  * @returns {Promise<Scaffolded>}
  */
 export async function scaffold(template, ask) {
@@ -80,7 +81,8 @@ export async function scaffold(template, ask) {
  * starter-kit question with, and Composer left waiting on one looks exactly
  * like a download that stalled.
  *
- * @param {{ dir: string, name: string, url: string, onStep?: (text: string) => void }} ask
+ * @param {{ dir: string, name: string, url: string,
+ *           onStep?: (text: string, pct?: number) => void }} ask
  * @returns {Promise<Scaffolded>}
  */
 async function laravel({ dir, name, url, onStep = () => {} }) {
@@ -171,14 +173,15 @@ export function laravelEnv(env, to) {
 /**
  * WordPress, from wordpress.org.
  *
- * @param {{ dir: string, name: string, url: string, onStep?: (text: string) => void }} ask
+ * @param {{ dir: string, name: string, url: string,
+ *           onStep?: (text: string, pct?: number) => void }} ask
  * @returns {Promise<Scaffolded>}
  */
 async function wordpress({ dir, name, onStep = () => {} }) {
   const zip = join(paths.downloads(), "wordpress-latest.zip");
   onStep("Downloading WordPress…");
   await download(WORDPRESS_ZIP, zip, {
-    onProgress: (pct) => onStep(`Downloading WordPress ${pct}%`),
+    onProgress: (pct) => onStep("Downloading WordPress", pct),
   });
 
   try {

@@ -33,6 +33,30 @@
   nothing is written to disk: the mailbox lives in memory and goes with the
   process. One binary, on all three platforms. See
   [mailpit.js](src/registry/mailpit.js).
+- **A backup on Windows wrote nothing and said it had worked.** 0.1.42 split
+  the archive path with a separator class that matched a forward slash only, so
+  on Windows the whole path survived the split: the parent directory was created
+  under the archive's own name, the archiver was handed a directory to write
+  into, and the toast still read "Backed up to ...". Paths are now split through
+  `core/paths.js`, which knows both separators, and a self-check exercises a
+  Windows path on any machine. Anyone on 0.1.42 should check their `backups/`
+  folder: the zips are not there.
+- **A dropdown is never cut off any more.** The Keep dropdown in the Backups
+  dialog lost its last option behind the dialog's own edge: a dialog clips what
+  overflows it, and the pane is a scroll container, so a list positioned inside
+  either one is trimmed with no way to reach what it hides. Every dropdown and
+  every row menu now floats above the window instead of inside its own control,
+  flips above the button when the room is there, and scrolls when the list is
+  longer than the screen. That is one change in `ui/el.js`, so it fixes the
+  version pickers, the port settings and the project menus at the same time.
+- **Every long job draws a loading state.** Backing up, restoring and
+  installing a template say which step they are on, with the app's own spinning
+  glyph and a progress bar - sweeping when there is nothing to count, filling
+  with a percentage for the WordPress download. The button itself already
+  swapped its icon for the spinner; what was missing was the line underneath
+  saying what it was doing, which is the only thing that helps when Composer
+  goes quiet for two minutes. A project opening a public link now shows the
+  cloudflared download the same way.
 - "Back up" in a project's menu no longer trails an ellipsis.
 
 ## 0.1.42

@@ -437,6 +437,96 @@ export function clearIconCache() {
 }
 
 /**
+ * Put a panel on top of everything, anchored to the control that opened it.
+ *
+ * Every popup here used to be `position:absolute` inside its own control, and
+ * that is only ever correct until the control sits inside something that clips.
+ * Both of ours do: the pane is a scroll container, and a dialog is
+ * `overflow:hidden` - so the Keep dropdown in the Backups dialog lost its last
+ * option behind the dialog's own edge, with no way to reach it.
+ *
+ * So the panel goes to `document.body` at FIXED coordinates: nothing in the
+ * tree above the control can clip it, and the only box it has to fit in is the
+ * window. It opens downwards, flips up when the window has more room above, and
+ * takes a `max-height` from whatever room it ends up with rather than being cut
+ * off - a long list scrolls instead of disappearing.
+ *
+ * The cost of fixed coordinates is that the panel does not follow a scroll, so
+ * any scroll closes it. That is the behaviour of every native menu.
+ *
+ * @param {HTMLElement} anchor  The control it belongs to.
+ * @param {HTMLElement} panel   Built by the caller, not yet in the document.
+ * @param {{ align?: "left" | "right", matchWidth?: boolean }} [opts]
+ * @returns {() => void} closes it
+ */
+export function floatPanel(anchor, panel, opts = {}) {
+  const GAP = 4;
+  const EDGE = 6;
+
+  panel.style.position = "fixed";
+  panel.style.zIndex = "60";
+  // Measured before it is seen: the height decides which way it opens, and a
+  // panel that flips after it is visible is worse than one that never flipped.
+  panel.style.visibility = "hidden";
+  panel.style.maxHeight = "none";
+  document.body.append(panel);
+
+  const place = () => {
+    const a = anchor.getBoundingClientRect();
+    if (opts.matchWidth) panel.style.minWidth = `${a.width}px`;
+
+    const wanted = panel.getBoundingClientRect().height;
+    const below = window.innerHeight - a.bottom - GAP - EDGE;
+    const above = a.top - GAP - EDGE;
+    const up = wanted > below && above > below;
+    const room = Math.max(96, Math.floor(up ? above : below));
+
+    panel.style.maxHeight = `${room}px`;
+    panel.style.overflowY = "auto";
+    const height = Math.min(wanted, room);
+    panel.style.top = up ? `${Math.max(EDGE, a.top - GAP - height)}px` : `${a.bottom + GAP}px`;
+
+    const width = panel.getBoundingClientRect().width;
+    const wish = opts.align === "right" ? a.right - width : a.left;
+    const left = Math.min(Math.max(EDGE, wish), Math.max(EDGE, window.innerWidth - width - EDGE));
+    panel.style.left = `${left}px`;
+    panel.style.visibility = "visible";
+  };
+  place();
+
+  const close = () => {
+    panel.remove();
+    document.removeEventListener("pointerdown", onOutside, true);
+    document.removeEventListener("keydown", onKey, true);
+    document.removeEventListener("scroll", onScroll, true);
+    window.removeEventListener("resize", close);
+  };
+  /** @param {Event} ev */
+  const onOutside = (ev) => {
+    const target = /** @type {Node} */ (ev.target);
+    if (!panel.contains(target) && !anchor.contains(target)) close();
+  };
+  /** @param {KeyboardEvent} ev */
+  const onKey = (ev) => {
+    if (ev.key !== "Escape") return;
+    // Before the dialog's own handler, or Escape would close the dialog this
+    // panel is sitting in and leave the panel orphaned over nothing.
+    ev.stopPropagation();
+    close();
+  };
+  /** @param {Event} ev */
+  const onScroll = (ev) => {
+    if (!panel.contains(/** @type {Node} */ (ev.target))) close();
+  };
+
+  document.addEventListener("pointerdown", onOutside, true);
+  document.addEventListener("keydown", onKey, true);
+  document.addEventListener("scroll", onScroll, true);
+  window.addEventListener("resize", close);
+  return close;
+}
+
+/**
  * A dropdown in the app's shape.
  *
  * A native `<select>` renders with the OS widget, which on Windows is a grey
@@ -482,35 +572,21 @@ export function dropdown(options, selected, onChange, opts = {}) {
   btn.addEventListener("focus", () => (btn.style.borderColor = "var(--ring)"));
   btn.addEventListener("blur", () => (btn.style.borderColor = "transparent"));
 
-  /** @type {HTMLElement | null} */
-  let menu = null;
-  const close = () => {
-    menu?.remove();
-    menu = null;
-    document.removeEventListener("pointerdown", onOutside, true);
-    document.removeEventListener("keydown", onKey, true);
-  };
-  /** @param {Event} ev */
-  const onOutside = (ev) => {
-    if (!wrap.contains(/** @type {Node} */ (ev.target))) close();
-  };
-  /** @param {KeyboardEvent} ev */
-  const onKey = (ev) => {
-    if (ev.key === "Escape") {
-      ev.stopPropagation();
-      close();
-    }
+  /** @type {(() => void) | null} */
+  let close = null;
+  const dismiss = () => {
+    close?.();
+    close = null;
   };
 
   btn.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    if (menu) return close();
-    menu = h(
+    if (close) return dismiss();
+    const menu = h(
       "div",
       {
         style:
-          "position:absolute;top:calc(100% + 4px);left:0;z-index:40;min-width:100%;max-height:240px;" +
-          "overflow:auto;padding:4px;border-radius:var(--radius, 8px);border:1px solid var(--border);" +
+          "padding:4px;border-radius:var(--radius, 8px);border:1px solid var(--border);" +
           "background:var(--popover, var(--background));box-shadow:0 10px 30px rgba(0,0,0,.35)",
       },
       options.map((o) =>
@@ -524,7 +600,7 @@ export function dropdown(options, selected, onChange, opts = {}) {
             on: {
               click: (e) => {
                 e.stopPropagation();
-                close();
+                dismiss();
                 if (o.value !== selected) void onChange(o.value);
               },
               mouseenter: (e) => {
@@ -543,9 +619,7 @@ export function dropdown(options, selected, onChange, opts = {}) {
         ),
       ),
     );
-    wrap.append(menu);
-    document.addEventListener("pointerdown", onOutside, true);
-    document.addEventListener("keydown", onKey, true);
+    close = floatPanel(btn, menu, { matchWidth: true });
   });
 
   wrap.append(btn);
@@ -628,49 +702,27 @@ export function actionsMenu(items, opts = {}) {
   // where the menu button should be. Nothing threw; it just was not there.
   const btn = button("", () => {}, { icon: "lucide:Ellipsis", title: opts.title ?? "More" });
 
-  /** @type {HTMLElement | null} */
-  let panel = null;
-  const close = () => {
-    panel?.remove();
-    panel = null;
-    document.removeEventListener("pointerdown", onOutside, true);
-    document.removeEventListener("keydown", onKey, true);
-  };
-  /** @param {Event} ev */
-  const onOutside = (ev) => {
-    if (!wrap.contains(/** @type {Node} */ (ev.target))) close();
-  };
-  /** @param {KeyboardEvent} ev */
-  const onKey = (ev) => {
-    if (ev.key === "Escape") {
-      ev.stopPropagation();
-      close();
-    }
+  /** @type {(() => void) | null} */
+  let close = null;
+  const dismiss = () => {
+    close?.();
+    close = null;
   };
 
   btn.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    if (panel) return close();
-    // UPWARDS, unless there is not enough room above the button for the panel.
-    // Opening downwards put the items below the fold on every row past the
-    // middle of a list, so pressing one meant scrolling first - and scrolling
-    // moves the row you were aiming at.
-    //
-    // The room is measured to the nearest CLIPPING ancestor, not to the top of
-    // the window: the pane is a scroll container inside a tab, so a panel that
-    // fits on screen can still be cut in half by the box it lives in. The
-    // panel's height is estimated from the item count rather than measured,
-    // because measuring needs it in the document first and a menu that flips
-    // after it is visible is worse than one that is occasionally four pixels
-    // out.
-    const needed = live.length * 27 + 8;
-    const up = btn.getBoundingClientRect().top - clipTop(btn) > needed + 8;
-    panel = h(
+    if (close) return dismiss();
+    // Anchored to the RIGHT edge of its button, because the button sits at the
+    // right end of a row: opening leftwards is what keeps it inside a narrow
+    // pane. `floatPanel` decides up or down from the room the WINDOW has, and
+    // takes the panel out of the pane's scroll container so neither edge can
+    // clip it.
+    const panel = h(
       "div",
       {
         style:
-          `position:absolute;${up ? "bottom" : "top"}:calc(100% + 4px);right:0;z-index:40;min-width:170px;` +
-          "padding:4px;border-radius:var(--radius, 8px);border:1px solid var(--border);" +
+          "min-width:170px;padding:4px;border-radius:var(--radius, 8px);" +
+          "border:1px solid var(--border);" +
           "background:var(--popover, var(--background));box-shadow:0 10px 30px rgba(0,0,0,.35)",
       },
       live.map((item) =>
@@ -687,7 +739,7 @@ export function actionsMenu(items, opts = {}) {
               click: (e) => {
                 e.stopPropagation();
                 if (item.disabled) return;
-                close();
+                dismiss();
                 item.onClick();
               },
               mouseenter: (e) => {
@@ -706,9 +758,7 @@ export function actionsMenu(items, opts = {}) {
         ),
       ),
     );
-    wrap.append(panel);
-    document.addEventListener("pointerdown", onOutside, true);
-    document.addEventListener("keydown", onKey, true);
+    close = floatPanel(btn, panel, { align: "right" });
   });
 
   wrap.append(btn);
@@ -766,23 +816,6 @@ export function checkbox(checked, opts = {}) {
   svg.append(path);
   box.append(svg);
   return box;
-}
-
-/**
- * Where the nearest ancestor that clips its children starts, in viewport
- * coordinates. `0` when nothing does.
- *
- * @param {HTMLElement} el
- * @returns {number}
- */
-function clipTop(el) {
-  for (let node = el.parentElement; node; node = node.parentElement) {
-    const overflow = getComputedStyle(node).overflowY;
-    if (overflow === "auto" || overflow === "scroll" || overflow === "hidden") {
-      return node.getBoundingClientRect().top;
-    }
-  }
-  return 0;
 }
 
 /**
@@ -1019,6 +1052,61 @@ export function skeleton(width = "100%", height = 11) {
       `width:${width};height:${height}px;flex:none;background:var(--muted);` +
       `animation:var(--animate-pulse, pulse 2s cubic-bezier(.4,0,.6,1) infinite)`,
   });
+}
+
+/**
+ * What a long job says about itself while it runs.
+ *
+ * Three pieces that already exist, assembled once: the spinning
+ * `status("working")` glyph, the step in words, and a `progress` bar - sweeping
+ * when there is nothing to count, filling when there is. Assembled HERE rather
+ * than in each dialog, because three dialogs writing their own was three
+ * different answers to "is this still going", and the case that matters most is
+ * the one with nothing to show: a Composer run prints nothing for two minutes,
+ * and a dialog with a disabled button looks exactly like a dialog that died.
+ *
+ * Hidden until the first `set`, and hidden again by `set("")`, so a layout does
+ * not carry an empty line before anything has happened.
+ *
+ * @returns {{ el: HTMLElement, set: (text: string, pct?: number) => void }}
+ */
+export function busyLine() {
+  const label = muted("");
+  const head = h("div", { style: "display:flex;align-items:center;gap:6px;min-width:0" });
+  const bar = h("div", { style: "display:flex;width:100%;min-width:0" });
+  const el = h("div", { style: "display:none;flex-direction:column;gap:4px;min-width:0" }, [
+    head,
+    bar,
+  ]);
+
+  /** @type {number | undefined} */
+  let last;
+  let drawn = false;
+
+  return {
+    el,
+    set(text, pct) {
+      if (!text) {
+        el.style.display = "none";
+        bar.replaceChildren();
+        head.replaceChildren();
+        drawn = false;
+        return;
+      }
+      if (!drawn) {
+        // Built once: `status` starts its own rotation, and a glyph replaced on
+        // every step would restart that rotation on every step.
+        head.replaceChildren(status("working"), label);
+        el.style.display = "flex";
+        drawn = true;
+      }
+      label.textContent = text;
+      if (bar.childElementCount === 0 || pct !== last) {
+        bar.replaceChildren(progress(pct));
+        last = pct;
+      }
+    },
+  };
 }
 
 /** A muted one-line caption. @param {string} text @returns {HTMLElement} */
