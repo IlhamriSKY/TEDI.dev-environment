@@ -48,6 +48,9 @@ export function setCtx(value) {
  * @property {string[]} firewallAllowed  Web-server executables the Windows
  *   firewall has already been told to let in, so turning sharing on again asks
  *   for no second administrator prompt.
+ * @property {number} keepBackups  How many backups of ONE project survive the
+ *   next backup of it. Zero keeps every one, and nothing is ever deleted
+ *   outside the project being backed up.
  */
 
 /** @type {DevenvConfig} */
@@ -66,6 +69,7 @@ export const config = {
   skipTerminalPath: false,
   shareLan: false,
   firewallAllowed: [],
+  keepBackups: 10,
 };
 
 /** @param {Partial<DevenvConfig>} patch */

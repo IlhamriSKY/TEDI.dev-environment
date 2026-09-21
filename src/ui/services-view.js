@@ -717,6 +717,13 @@ function serviceRow(id, refresh) {
           disabled: Boolean(busy),
           onClick: () => p && void openInstaller(p, refresh),
         },
+    id === "mailpit" && running
+      ? {
+          label: "Open the inbox",
+          icon: "lucide:Mail",
+          onClick: () => void openFolder(`http://127.0.0.1:${st?.port ?? 8025}/`),
+        }
+      : null,
     id === "mysql" && phpMyAdminInstalledNow()
       ? {
           label: "phpMyAdmin",

@@ -114,6 +114,31 @@ async function runSql(sql) {
 }
 
 /**
+ * Create a database if it is not already there.
+ *
+ * Here rather than in the caller because this is the one file that owns talking
+ * to this server, and `runSql` is where the client path, the port and the
+ * "is it even running" check already live. The name is validated rather than
+ * escaped: it is interpolated into an identifier, where MySQL has no escape at
+ * all beyond doubling a backtick, and a quick-app name has no business
+ * containing one.
+ *
+ * `utf8mb4` explicitly, because a server left on an older default gives a
+ * database that cannot hold an emoji and reports it as a truncation error
+ * three months later.
+ *
+ * @param {string} name @returns {Promise<{ ok: boolean, error?: string }>}
+ */
+export async function createDatabase(name) {
+  if (!/^[A-Za-z0-9_]{1,64}$/.test(name))
+    return { ok: false, error: `"${name}" is not a usable database name.` };
+  const res = await runSql(
+    `CREATE DATABASE IF NOT EXISTS \`${name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`,
+  );
+  return res.ok ? { ok: true } : { ok: false, error: res.out.trim() };
+}
+
+/**
  * Every account, minus the ones MySQL creates for itself.
  *
  * `mysql.session`, `mysql.sys` and `mysql.infoschema` are internal: they cannot

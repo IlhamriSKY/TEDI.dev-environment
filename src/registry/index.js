@@ -62,12 +62,13 @@ import { node } from "./node.js";
 import { composer } from "./composer.js";
 import { mysql, postgres } from "./db.js";
 import { redis } from "./redis.js";
+import { mailpit } from "./mailpit.js";
 import { nginx, apache } from "./servers.js";
 import { mkcert } from "./mkcert.js";
 
 /** Dashboard order: what you set up first comes first.
  *  @type {Provider[]} */
-const ALL = [php, node, composer, nginx, apache, mysql, postgres, redis, mkcert];
+const ALL = [php, node, composer, nginx, apache, mysql, postgres, redis, mailpit, mkcert];
 
 /** @type {Map<string, Provider>} */
 const BY_ID = new Map(ALL.map((p) => [p.id, p]));

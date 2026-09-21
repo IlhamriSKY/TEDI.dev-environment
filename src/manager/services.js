@@ -28,7 +28,7 @@ import { startCron, stopCron, isRunning as isCronRunning } from "./cron.js";
 /** @typedef {import("../runtime.js").ServiceStatus} ServiceStatus */
 
 /** Services this module knows how to run, in dashboard order. */
-export const SERVICE_IDS = ["nginx", "apache", "mysql", "postgres", "redis", "cron"];
+export const SERVICE_IDS = ["nginx", "apache", "mysql", "postgres", "redis", "mailpit", "cron"];
 
 /**
  * Services that are a timer in this extension rather than a process on disk.
@@ -425,6 +425,34 @@ async function planFor(id, row, port) {
         },
       };
     }
+
+    case "mailpit":
+      return {
+        program: join(binDir, `mailpit${exeSuffix()}`),
+        args: [
+          // Two listeners, and only one of them is `port`. The configurable
+          // one is the web inbox, because that is what the row opens and what
+          // the status check probes; SMTP stays on 1025, the number every
+          // framework's example mail configuration already carries, so a
+          // project needs no setting changed to reach it.
+          "--listen",
+          `127.0.0.1:${port}`,
+          "--smtp",
+          "127.0.0.1:1025",
+          // Loopback only, and no persistence: a development mailbox that
+          // survives a restart is a mailbox nobody empties, and mail held in
+          // memory cannot be read off the disk by anything else later.
+          // Any credentials, including none: a project pointed at this is
+          // pointed at it for one afternoon, and a local mailbox that refuses
+          // the password a framework example ships with is a mailbox that
+          // looks broken.
+          "--smtp-auth-accept-any",
+          "--smtp-auth-allow-insecure",
+          // No update check. It is a background HTTPS request on every start,
+          // to tell a user about a release this extension installs for them.
+          "--disable-version-check",
+        ],
+      };
 
     default:
       throw new Error(`No start plan for "${id}".`);

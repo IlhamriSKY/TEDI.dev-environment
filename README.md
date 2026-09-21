@@ -32,6 +32,12 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
   that folder, so `php`, `node`, `npm` and `composer` in it are that project's
   versions. Needs TEDI 0.4.47 or newer; on an older one the button is simply
   not there.
+- **New project can be a Laravel or a WordPress that already runs.** Pick a
+  template beside the name: Laravel comes from `composer create-project`, is
+  served from `public/`, gets its database created and its `.env` pointed at it,
+  and `APP_URL` set to the real domain; WordPress is the current release with
+  `wp-config.php` written for you, keys and salts included. Empty folder is
+  still the default.
 - **Back up a project with its database.** **Back up** in a project's menu
   writes one zip into `<root>/backups/`: the project folder, with a `.sql` dump
   of its database inside it. The database and the account are read from the
@@ -39,6 +45,14 @@ Then open the pane with **Ctrl/Cmd + Alt + E**.
   database somewhere else (WordPress, say) takes one edit; leave the name blank
   and you get the files only. `node_modules` and `vendor` are skipped unless you
   say otherwise. The database has to be running to be dumped.
+- **Restore one, from the Backups button.** Every zip with its date and size;
+  Restore puts the files back where the project lives and imports the `.sql`
+  inside it, registering and serving the project again if it had been removed.
+  Files the backup does not carry are left alone. "Keep 3 / 5 / 10 / all" prunes
+  old copies of the project you just backed up, and never any other project's.
+- **Mailpit catches the mail your sites send.** A service like the databases:
+  SMTP on `127.0.0.1:1025`, a web inbox on 8025 that its row opens. Nothing
+  reaches a real inbox, and nothing is written to disk.
 - **Nginx and Apache, one at a time.** Both get installed, and the tick on the
   row picks which one your project URLs point at. Starting either stops the
   other, so there is only ever one server on the ports you configured and one
@@ -197,7 +211,7 @@ Under the root folder you picked in step 1, and nowhere else:
 <root>/www/         your projects           <root>/data/      the databases
 <root>/runtimes/    php, node, composer     <root>/logs/      what each service wrote
 <root>/servers/     nginx, apache           <root>/backups/   the zips you asked for
-<root>/services/    mysql, postgres, redis  <root>/internal/  everything generated
+<root>/services/    mysql, postgres, redis, mailpit   <root>/internal/ everything generated
 ```
 
 `internal/` holds the shims, the certificates, the generated server config, the

@@ -23,9 +23,12 @@
 
 /** Where each service's light sits, and which services own it.
  *
- *  Four lights for six services: `cron` is a timer inside this extension, not
- *  something you connect to, and the two web servers are exclusive (the ticked
- *  one is the one project URLs point at), so they share the top-left seat. */
+ *  Four lights for seven services. `cron` is a timer inside this extension
+ *  rather than something you connect to; `mailpit` is a mailbox you open when
+ *  you want it, not a dependency a site fails without; and the two web servers
+ *  are exclusive (the ticked one is the one project URLs point at), so they
+ *  share the top-left seat. The glyph is 16 px in the status bar, which is the
+ *  real constraint: a fifth light there is a smudge, not information. */
 //  `dur` and `delay` are what stop the four breathing as one. Four lights
 //  rising and falling on the same beat reads as one animation with four heads,
 //  which is the one thing a rack never looks like; four independent services

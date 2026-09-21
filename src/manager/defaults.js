@@ -60,6 +60,7 @@ const ORDER = [
   "mysql",
   "postgres",
   "redis",
+  "mailpit",
 ];
 
 /**

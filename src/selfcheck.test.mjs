@@ -41,7 +41,9 @@ import {
 } from "./web/share.js";
 import { cloudflaredAsset } from "./registry/cloudflared.js";
 import { offeredConnections } from "./manager/handoff.js";
-import { parseEnvDb, dumpArgs } from "./manager/backup.js";
+import { parseEnvDb, dumpArgs, backupProjectName } from "./manager/backup.js";
+import { laravelEnv, wpConfig } from "./project/quickapp.js";
+import { mailpitAsset } from "./registry/mailpit.js";
 import { releaseDate } from "./ui/version-picker.js";
 import { serverIcon } from "./ui/server-icon.js";
 
@@ -394,6 +396,15 @@ test("a dump is written to a FILE, never through the log buffer", () => {
   assert.ok(withPassword.includes("--user=u"));
 });
 
+test("an archive is filed under its project, dashes in the name and all", () => {
+  assert.equal(backupProjectName("shop-2026-09-20-1432.zip"), "shop");
+  assert.equal(backupProjectName("my-old-shop-2026-09-20-1432.zip"), "my-old-shop");
+  // Anything that is not one of ours keeps its whole name, so pruning one
+  // project can never reach it.
+  assert.equal(backupProjectName("hand-made.zip"), "hand-made");
+  assert.notEqual(backupProjectName("shop-two-2026-09-20-1432.zip"), "shop");
+});
+
 test("pg_dump is told never to prompt, because a prompt would hang", () => {
   const args = dumpArgs(
     { service: "postgres", database: "shop", user: "", password: "" },
@@ -404,6 +415,96 @@ test("pg_dump is told never to prompt, because a prompt would hang", () => {
   assert.ok(args.includes("--file=/t/d.sql"));
   assert.ok(args.includes("--username=postgres"), "no user means the superuser initdb made");
   assert.ok(args.includes("--create"));
+});
+
+console.log("\nquick apps and the mailbox");
+
+test("Mailpit's asset uses Go's name for macOS, not ours", () => {
+  setCtx(/** @type {any} */ ({ os: { platform: "macos", arch: "aarch64" } }));
+  assert.equal(mailpitAsset(), "mailpit-darwin-arm64.tar.gz");
+  setCtx(/** @type {any} */ ({ os: { platform: "windows", arch: "x86_64" } }));
+  assert.equal(mailpitAsset(), "mailpit-windows-amd64.zip");
+  setCtx(/** @type {any} */ ({ os: { platform: "linux", arch: "x86_64" } }));
+  assert.equal(mailpitAsset(), "mailpit-linux-amd64.tar.gz");
+});
+
+test("a Laravel .env ends up with exactly one live DB_CONNECTION", () => {
+  setCtx(/** @type {any} */ ({ os: { platform: "windows", arch: "x86_64" } }));
+  // What `laravel/laravel` actually ships: sqlite live, the MySQL block
+  // commented out underneath it.
+  const shipped = [
+    "APP_NAME=Laravel",
+    "APP_URL=http://localhost",
+    "",
+    "DB_CONNECTION=sqlite",
+    "# DB_HOST=127.0.0.1",
+    "# DB_PORT=3306",
+    "# DB_DATABASE=laravel",
+    "# DB_USERNAME=root",
+    "# DB_PASSWORD=",
+    "",
+    "MAIL_MAILER=log",
+    "",
+  ].join("\n");
+
+  const out = laravelEnv(shipped, { url: "https://shop.test", database: "shop" });
+  const live = out.split("\n").filter((l) => /^DB_/.test(l));
+  assert.equal(
+    live.filter((l) => l.startsWith("DB_CONNECTION=")).length,
+    1,
+    "two DB_CONNECTION lines means the answer depends on which one phpdotenv read last",
+  );
+  assert.ok(live.includes("DB_CONNECTION=mysql"));
+  assert.ok(live.includes("DB_DATABASE=shop"));
+  assert.ok(!out.includes("sqlite"), "the sqlite line survived");
+  assert.ok(
+    !out.includes("# DB_"),
+    "a commented DB line survived and will confuse the next reader",
+  );
+  assert.ok(out.includes("APP_URL=https://shop.test"), "APP_URL still points at localhost");
+  assert.ok(out.includes("MAIL_MAILER=log"), "a line that is not ours was dropped");
+});
+
+test("no database means no DB block invented", () => {
+  const out = laravelEnv("APP_NAME=Laravel\nDB_CONNECTION=sqlite\n", {
+    url: "https://x.test",
+    database: null,
+  });
+  assert.ok(!/^DB_/m.test(out), "wrote a database block with no database behind it");
+});
+
+test("wp-config takes the credentials and the generated salts", () => {
+  setCtx(/** @type {any} */ ({ os: { platform: "windows", arch: "x86_64" } }));
+  const sample = [
+    "<?php",
+    "define( 'DB_NAME', 'database_name_here' );",
+    "define( 'DB_USER', 'username_here' );",
+    "define( 'DB_PASSWORD', 'password_here' );",
+    "define( 'DB_HOST', 'localhost' );",
+    "define( 'AUTH_KEY',         'put your unique phrase here' );",
+    "define( 'NONCE_SALT',       'put your unique phrase here' );",
+  ].join("\n");
+  const salts = [
+    "define('AUTH_KEY',         'x1#realsalt');",
+    "define('NONCE_SALT',       'x8#realsalt');",
+  ].join("\n");
+
+  const out = wpConfig(sample, { database: "blog", salts });
+  assert.ok(out.includes("'DB_NAME', 'blog'"));
+  assert.ok(out.includes("'DB_USER', 'root'"));
+  assert.ok(out.includes("'DB_PASSWORD', ''"));
+  assert.match(out, /'DB_HOST', '127\.0\.0\.1:\d+'/, "left WordPress talking to a socket name");
+  assert.ok(out.includes("x1#realsalt"), "AUTH_KEY kept its sample value");
+  assert.ok(out.includes("x8#realsalt"), "NONCE_SALT kept its sample value");
+  assert.ok(
+    !out.includes("put your unique phrase here"),
+    "an unreplaced placeholder salt is a shared secret on every install",
+  );
+});
+
+test("a salt list that never arrived leaves the file usable", () => {
+  const sample = "define( 'AUTH_KEY',         'put your unique phrase here' );";
+  assert.equal(wpConfig(sample, { database: "blog", salts: "" }), sample);
 });
 
 console.log("\nweb servers");

@@ -223,3 +223,52 @@ export async function probe(program, args, opts = {}) {
     return null;
   }
 }
+
+/**
+ * Run a program with a FILE as its standard input.
+ *
+ * The one thing `shell_bg_spawn_direct` cannot do: it hands every child
+ * `Stdio::null()`, and the MySQL client has no argv-only way to read a script -
+ * `--execute "source <file>"` is a command of the CLIENT, which the server
+ * answers with a syntax error (see the note at the top of
+ * `manager/mysqlusers.js`). Restoring a dump therefore needs the operating
+ * system to open the file as stdin, and that needs one process in between.
+ *
+ * Windows gets PowerShell's `Start-Process -RedirectStandardInput`, NOT
+ * `cmd /c "... < file"`. The command string reaches cmd through Rust's argv
+ * quoting, which escapes an inner double quote as `\"`, and cmd does not
+ * understand that - so the first path with a space in it breaks, and every
+ * path here has one. Every quote below is a SINGLE quote, which that quoting
+ * passes through untouched: the same shape `core/archive.js` already relies on
+ * for Expand-Archive. The redirect is done by the OS, so the file arrives
+ * byte for byte, with no encoding layer between a utf8mb4 dump and the client.
+ *
+ * @param {string} program
+ * @param {string[]} args
+ * @param {string} file  Absolute path fed to the program as stdin.
+ * @param {{ cwd?: string, timeoutMs?: number }} [opts]
+ * @returns {Promise<RunResult>}
+ */
+export async function runWithInput(program, args, file, opts = {}) {
+  if (ctx?.os?.platform === "windows") {
+    const list = args.length > 0 ? ` -ArgumentList ${args.map(psQuote).join(",")}` : "";
+    const command =
+      `$p = Start-Process -FilePath ${psQuote(program)}${list} ` +
+      `-RedirectStandardInput ${psQuote(file)} -NoNewWindow -Wait -PassThru; exit $p.ExitCode`;
+    return await run("powershell", ["-NoProfile", "-NonInteractive", "-Command", command], opts);
+  }
+  const line = `${[program, ...args].map(shellQuote).join(" ")} < ${shellQuote(file)}`;
+  return await run("sh", ["-c", line], opts);
+}
+
+/**
+ * Quote one argument for PowerShell. A single-quoted string there is literal
+ * and the only escape inside it is a doubled quote, which is why this is the
+ * form that survives being passed through argv.
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+function psQuote(s) {
+  return `'${String(s).replace(/'/g, "''")}'`;
+}

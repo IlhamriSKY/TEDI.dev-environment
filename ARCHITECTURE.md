@@ -262,17 +262,17 @@ src/
   runtime.js          ctx + state singletons and setters (the ONE owner)
   core/               paths.js fsx.js proc.js net.js archive.js elevate.js
   registry/           index.js util.js php.js node.js composer.js db.js
-                      redis.js servers.js mkcert.js
+                      redis.js mailpit.js servers.js mkcert.js
   manager/            install.js versions.js config.js defaults.js apply.js
                       services.js cron.js migrate.js backup.js
                       phpini.js phpext.js xdebug.js packagers.js
-  project/            projects.js resolve.js shims.js
+  project/            projects.js resolve.js shims.js quickapp.js
   web/                vhost.js serverroot.js hosts.js certs.js ports.js
                       publish.js
   ui/                 dashboard.js setup.js install-all.js el.js marks.js
                       runtimes-view.js services-view.js projects-view.js
                       cron-view.js php-view.js php-ext-view.js
-                      packagers-view.js
+                      packagers-view.js backups-view.js
 ```
 
 `registry/util.js` exists because `registry/index.js` imports all nine providers

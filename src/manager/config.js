@@ -50,7 +50,7 @@ const SETTING_KEYS = /** @type {const} */ ([
  * @typedef {{ defaults?: Record<string, string>, ports?: Record<string, number>,
  *             autostart?: Record<string, boolean>, seedGeneration?: number,
  *             driversSeeded?: boolean, skipTerminalPath?: boolean,
- *             firewallAllowed?: string[] }} StoredConfig
+ *             firewallAllowed?: string[], keepBackups?: number }} StoredConfig
  */
 
 /**
@@ -113,6 +113,7 @@ export async function loadConfig() {
           : 0,
     skipTerminalPath: stored.skipTerminalPath === true,
     firewallAllowed: Array.isArray(stored.firewallAllowed) ? stored.firewallAllowed : [],
+    keepBackups: typeof stored.keepBackups === "number" ? stored.keepBackups : 10,
   });
 }
 
@@ -127,6 +128,7 @@ async function saveConfig() {
     seedGeneration: config.seedGeneration,
     skipTerminalPath: config.skipTerminalPath,
     firewallAllowed: config.firewallAllowed,
+    keepBackups: config.keepBackups,
   };
   await writeJson(paths.configFile(), stored);
 }
@@ -220,6 +222,16 @@ export async function setServicePort(id, port) {
  */
 export async function setSkipTerminalPath(skip) {
   setConfig({ skipTerminalPath: skip });
+  await saveConfig();
+}
+
+/**
+ * How many backups of one project to keep. Zero keeps every one of them.
+ *
+ * @param {number} keep @returns {Promise<void>}
+ */
+export async function setKeepBackups(keep) {
+  setConfig({ keepBackups: Math.max(0, Math.floor(keep)) });
   await saveConfig();
 }
 

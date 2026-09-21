@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.1.43
+
+- **Restore a backup, from a Backups list beside the button that makes them.**
+  The Projects header has a Backups button: every zip, newest first, with its
+  date and size, one to delete it and one to put it back. Restoring extracts
+  over the project where it already lives (a project outside `www` is restored
+  where it is, not cloned into `www`), and anything the archive does not carry
+  is left alone rather than wiped. The `.sql` inside is imported into the server
+  the project's `.env` names, and a project that no longer exists is registered
+  and served again, so a restore gives back the site and not just the files.
+  MySQL is fed through stdin by `Start-Process -RedirectStandardInput` on
+  Windows, because its client has no argv way to read a script; PostgreSQL gets
+  `psql --file` with `ON_ERROR_STOP=1`, without which a restore that failed
+  every statement still exits 0. See [backup.js](src/manager/backup.js) and
+  [backups-view.js](src/ui/backups-view.js).
+- **Old backups are pruned, per project.** "Keep 3 / 5 / 10 / all" sits next to
+  the list and applies after each backup. Scoped to the project just backed up,
+  so pruning can only ever remove older copies of that one thing.
+- **New project can install Laravel or WordPress into it.** The dialog has a
+  template beside the name. Laravel is `composer create-project`, served from
+  `public/`, with its database created and `.env` rewritten (one live
+  `DB_CONNECTION`, not the shipped sqlite line with the MySQL block commented
+  out under it) and `APP_URL` pointed at the real domain. WordPress is the
+  current release from wordpress.org with `wp-config.php` written for you,
+  including freshly generated keys and salts. Both create and connect the
+  database, starting MySQL if it is installed but stopped. See
+  [quickapp.js](src/project/quickapp.js).
+- **Mailpit is a service now.** It catches everything your sites send, on SMTP
+  `127.0.0.1:1025`, and shows it in a web inbox on 8025 that the service row
+  opens. Nothing a project under development sends can reach a real person, and
+  nothing is written to disk: the mailbox lives in memory and goes with the
+  process. One binary, on all three platforms. See
+  [mailpit.js](src/registry/mailpit.js).
+- "Back up" in a project's menu no longer trails an ellipsis.
+
 ## 0.1.42
 
 - **Back up a project, with its database, as one zip.** "Back up" in a

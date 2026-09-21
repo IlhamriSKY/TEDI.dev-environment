@@ -21,14 +21,14 @@
 // name carries the timestamp, so it cannot collide with a dump the user keeps
 // in there themselves.
 
-import { run } from "../core/proc.js";
-import { pack } from "../core/archive.js";
+import { run, runWithInput } from "../core/proc.js";
+import { pack, extract } from "../core/archive.js";
 import { paths, join } from "../core/paths.js";
-import { remove } from "../core/fsx.js";
+import { remove, readDir, readText } from "../core/fsx.js";
 import { resolveVersion } from "./versions.js";
 import { activeVersion } from "./config.js";
 import { plannedPort } from "../web/ports.js";
-import { state, exeSuffix } from "../runtime.js";
+import { config, state, exeSuffix } from "../runtime.js";
 
 /**
  * @typedef {object} DbTarget
@@ -223,5 +223,177 @@ export async function backupProject(project, opts = {}) {
   } finally {
     if (dumpFile) await remove(dumpFile);
   }
+  // After the new one is safely written, never before: a prune that ran first
+  // would make room by deleting a backup and then fail to write its
+  // replacement.
+  await pruneBackups(project.name, config.keepBackups);
   return out;
+}
+
+/**
+ * Every backup zip on disk, newest first.
+ *
+ * @returns {Promise<{ name: string, path: string, size: number, mtime: number,
+ *                     project: string }[]>}
+ */
+export async function listBackups() {
+  const dir = paths.backups();
+  const entries = await readDir(dir);
+  return entries
+    .filter((e) => e.kind === "file" && /\.zip$/i.test(e.name))
+    .map((e) => ({
+      name: e.name,
+      path: join(dir, e.name),
+      size: e.size,
+      mtime: e.mtime,
+      project: backupProjectName(e.name),
+    }))
+    .sort((a, b) => b.mtime - a.mtime);
+}
+
+/**
+ * Which project an archive belongs to.
+ *
+ * `<project>-<date>-<time>.zip`, so the project is everything before the
+ * timestamp `stamp()` writes: a name with its own dashes survives, and a zip
+ * somebody dropped in here by hand keeps its whole name and simply groups
+ * alone. Exported for the self-check, because this string is what `prune`
+ * compares against - a parse that ate one dash too many would file a backup
+ * under a project that is not its own.
+ *
+ * @param {string} file @returns {string}
+ */
+export function backupProjectName(file) {
+  return file.replace(/\.zip$/i, "").replace(/-\d{4}-\d{2}-\d{2}-\d{4}$/, "");
+}
+
+/**
+ * Keep the newest `keep` backups OF ONE PROJECT and delete the rest.
+ *
+ * Per project rather than across the folder, and that is the whole safety
+ * argument: a global "keep 10" run after backing up one project deletes the
+ * history of the two projects you did not touch. Scoped this way, the only
+ * files a backup can ever remove are older copies of the thing just backed up.
+ *
+ * @param {string} project @param {number} keep  Zero or less keeps everything.
+ * @returns {Promise<number>} how many were deleted
+ */
+export async function pruneBackups(project, keep) {
+  if (!Number.isFinite(keep) || keep <= 0) return 0;
+  const mine = (await listBackups()).filter((b) => b.project === project);
+  const doomed = mine.slice(keep);
+  for (const backup of doomed) await remove(backup.path);
+  return doomed.length;
+}
+
+/**
+ * Put a backup back: the files, and the dump inside it.
+ *
+ * The files are EXTRACTED OVER their old home rather than into a clean folder:
+ * `tar -x` overwrites what the archive carries and leaves everything else
+ * alone, so a restore cannot silently delete the `storage/` a backup was
+ * taken before. Emptying the folder first would be the tidier-looking choice
+ * and the one that loses work.
+ *
+ * Where "home" is: the folder the matching project already sits in, so a
+ * project registered from outside `www` is restored where it lives rather than
+ * cloned into `www` under the same domain. With no such project it goes to
+ * `www`, which is where Refresh will find it.
+ *
+ * @param {{ path: string, project: string }} backup
+ * @param {{ into?: string, database?: boolean, onStep?: (text: string) => void }} [opts]
+ * @returns {Promise<{ dir: string, database: string | null }>}
+ */
+export async function restoreBackup(backup, opts = {}) {
+  const onStep = opts.onStep ?? (() => {});
+  const into = opts.into ?? paths.www();
+
+  onStep("Unpacking…");
+  await extract(backup.path, into);
+  const dir = join(into, backup.project);
+
+  if (opts.database === false) return { dir, database: null };
+
+  onStep("Looking for a dump…");
+  const dump = await findDump(dir);
+  if (!dump) return { dir, database: null };
+
+  // Which server the dump belongs to is read from the project's own `.env`,
+  // the same file the backup read when it decided what to dump. A dump with no
+  // `.env` beside it is left on disk rather than guessed at: importing a
+  // PostgreSQL script into MySQL fails late, after it has already run half of
+  // whatever it could parse.
+  const target = parseEnvDb(await readText(join(dir, ".env")));
+  if (!target) return { dir, database: null };
+
+  onStep(`Importing ${target.database}…`);
+  const res = await importDump(target, dump);
+  if (!res.ok) throw new Error(res.error ?? "The dump could not be imported.");
+  return { dir, database: target.database };
+}
+
+/** The newest `.sql` at the root of a restored project, or null.
+ *  @param {string} dir @returns {Promise<string | null>} */
+async function findDump(dir) {
+  const sql = (await readDir(dir))
+    .filter((e) => e.kind === "file" && /\.sql$/i.test(e.name))
+    .sort((a, b) => b.mtime - a.mtime);
+  return sql[0] ? join(dir, sql[0].name) : null;
+}
+
+/**
+ * Load a `.sql` script into its server.
+ *
+ * The two clients need opposite things. `psql` reads a file itself with `-f`,
+ * and needs `ON_ERROR_STOP=1` or it runs to the end and exits 0 after every
+ * statement has failed - a restore that reports success and restored nothing.
+ * The MySQL client has no such flag and must be fed through stdin, which is
+ * what `runWithInput` exists for; it stops at the first error by default.
+ *
+ * @param {DbTarget} target @param {string} file
+ * @returns {Promise<{ ok: boolean, error?: string }>}
+ */
+export async function importDump(target, file) {
+  const label = target.service === "mysql" ? "MySQL" : "PostgreSQL";
+  const row = resolveVersion(target.service, activeVersion(target.service));
+  if (!row) return { ok: false, error: `${label} is not installed.` };
+  if (state.services.get(target.service)?.state !== "running") {
+    return { ok: false, error: `${label} is not running, so nothing can be imported.` };
+  }
+  const port = servicePort(target.service);
+  const timeoutMs = 30 * 60_000;
+
+  const res =
+    target.service === "mysql"
+      ? await runWithInput(
+          join(row.binDir, `mysql${exeSuffix()}`),
+          [
+            "--host=127.0.0.1",
+            `--port=${port}`,
+            `--user=${target.user || "root"}`,
+            ...(target.password ? [`--password=${target.password}`] : []),
+          ],
+          file,
+          { timeoutMs },
+        )
+      : await run(
+          join(row.binDir, `psql${exeSuffix()}`),
+          [
+            "--host=127.0.0.1",
+            `--port=${port}`,
+            `--username=${target.user || "postgres"}`,
+            "--no-password",
+            "--set=ON_ERROR_STOP=1",
+            `--file=${file}`,
+            // The database to connect to while the script runs. Our own dumps
+            // carry `CREATE DATABASE` and switch to it themselves, so this is
+            // only the doorway in, and `postgres` is the one initdb always makes.
+            "postgres",
+          ],
+          { timeoutMs },
+        );
+
+  if (res.code === 0) return { ok: true };
+  const tail = res.out.trim().split(/\r?\n/).slice(-3).join(" ");
+  return { ok: false, error: tail || `${label} refused the dump (exit ${res.code}).` };
 }

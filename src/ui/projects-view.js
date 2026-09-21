@@ -37,6 +37,8 @@ import { paths, join } from "../core/paths.js";
 import { openFolder } from "../core/proc.js";
 import { mkdirp, exists, readText } from "../core/fsx.js";
 import { backupProject, parseEnvDb, HEAVY } from "../manager/backup.js";
+import { openBackups } from "./backups-view.js";
+import { scaffold, TEMPLATES } from "../project/quickapp.js";
 import { publish, republish } from "../web/publish.js";
 import { lanAddresses, lanUrl, startTunnel, stopTunnel } from "../web/share.js";
 import { state, config, ctx, loudBusy } from "../runtime.js";
@@ -94,6 +96,10 @@ export async function projectsView(refresh) {
 
   const aside = h("div", { style: "display:flex;flex-wrap:wrap;gap:5px;align-items:center" }, [
     rows.length > 0 ? field : null,
+    button("Backups", () => openBackups(refresh), {
+      icon: "lucide:Archive",
+      title: "Everything Back up has written, and restoring one",
+    }),
     button("Refresh", () => void refreshProjects(refresh), {
       icon: "lucide:RefreshCw",
       title: `Pick up anything new in ${paths.www()}`,
@@ -232,7 +238,7 @@ async function projectRow(project, refresh, ip) {
                 }
               : null,
             {
-              label: "Back up…",
+              label: "Back up",
               icon: "lucide:Archive",
               onClick: () => void openBackup(project),
             },
@@ -538,10 +544,35 @@ async function openBackup(project) {
  * @param {() => void} refresh @returns {Promise<void>}
  */
 async function newProject(refresh) {
-  const name = await askProjectName();
-  if (!name) return;
-  const dir = join(paths.www(), name);
-  try {
+  /** @type {import("../project/quickapp.js").Template} */
+  let template = "empty";
+
+  const field = textInput("my-app");
+  const preview = muted("");
+  const step = muted("");
+  const picker = dropdown(
+    TEMPLATES.map((t) => ({ value: t.value, label: t.label, hint: t.hint })),
+    template,
+    (value) => {
+      template = /** @type {import("../project/quickapp.js").Template} */ (value);
+      sync();
+    },
+    { width: "150px" },
+  );
+
+  const sync = () => {
+    const name = slug(field.value.trim());
+    preview.textContent = name
+      ? `${template === "empty" ? "Creates" : "Installs into"} ${join(paths.www(), name)}, ` +
+        `served at ${name}.${config.domainSuffix}`
+      : "";
+  };
+  field.addEventListener("input", sync);
+
+  const create = async () => {
+    const name = slug(field.value.trim());
+    if (!name) return;
+    const dir = join(paths.www(), name);
     if (await exists(dir)) {
       // Registering it anyway would be the friendly-looking answer and the
       // wrong one: "New project" that quietly adopts whatever was already at
@@ -549,59 +580,53 @@ async function newProject(refresh) {
       ctx?.ui.toast(`${dir} already exists. Press Refresh to serve it.`, { variant: "warning" });
       return;
     }
-    await mkdirp(dir);
-    const project = await addProject(dir);
-    await serve([project.name], refresh);
-  } catch (err) {
-    ctx?.ui.toast(err instanceof Error ? err.message : String(err), { variant: "error" });
-  }
-}
-
-/**
- * Ask for the name, as a folder name and a domain label at once.
- *
- * `slug` is what the domain uses, so the field shows what the domain WILL be
- * rather than letting someone type "My App" and then find a site at
- * `my-app.test` they did not name. The folder gets the same slug, so the two
- * never diverge.
- *
- * @returns {Promise<string | null>}
- */
-function askProjectName() {
-  return new Promise((resolve) => {
-    /** @type {string | null} */
-    let answer = null;
-    const field = textInput("my-app");
-    const preview = muted("");
-    const sync = () => {
-      const name = slug(field.value.trim());
-      preview.textContent = field.value.trim()
-        ? `Creates ${join(paths.www(), name)}, served at ${name}.${config.domainSuffix}`
-        : "";
-    };
-    field.addEventListener("input", sync);
-
-    const commit = () => {
-      if (!field.value.trim()) return;
-      answer = slug(field.value.trim());
+    try {
+      await mkdirp(dir);
+      const made = await scaffold(template, {
+        dir,
+        name,
+        // The domain is decided by the name and the settings, both of which are
+        // already known here - so a template can write it into a config file
+        // before the project is registered, which is when it has to be there.
+        url: projectUrl({ id: "", name, path: dir }),
+        onStep: (text) => {
+          step.textContent = text;
+        },
+      });
+      const project = await addProject(dir, made.docRoot ? { docRoot: made.docRoot } : {});
       dialog.close();
-    };
-    field.addEventListener("keydown", (ev) => {
-      if (/** @type {KeyboardEvent} */ (ev).key === "Enter") commit();
-    });
+      await serve([project.name], refresh);
+      if (made.note) ctx?.ui.toast(made.note, { variant: "warning" });
+      else if (made.database) {
+        ctx?.ui.toast(`${made.database} was created and ${project.name} points at it.`, {
+          variant: "success",
+        });
+      }
+    } catch (err) {
+      step.textContent = "";
+      ctx?.ui.toast(err instanceof Error ? err.message : String(err), { variant: "error" });
+    }
+  };
 
-    const dialog = modal({
-      title: "New project",
-      description: `A folder in ${paths.www()}, with its virtual host and certificate written for it.`,
-      body: h("div", { style: "display:flex;flex-direction:column;gap:6px" }, [field, preview]),
-      footer: h("div", { style: "display:flex;gap:8px;justify-content:flex-end" }, [
-        button("Cancel", () => dialog.close()),
-        button("Create", commit, { variant: "primary", icon: "lucide:Plus" }),
-      ]),
-      onClose: () => resolve(answer),
-    });
-    field.focus();
+  field.addEventListener("keydown", (ev) => {
+    if (/** @type {KeyboardEvent} */ (ev).key === "Enter") void create();
   });
+
+  const dialog = modal({
+    title: "New project",
+    description: `A folder in ${paths.www()}, with its virtual host and certificate written for it.`,
+    body: h("div", { style: "display:flex;flex-direction:column;gap:6px" }, [
+      h("div", { style: "display:flex;align-items:center;gap:5px" }, [field, picker]),
+      preview,
+      step,
+    ]),
+    footer: h("div", { style: "display:flex;gap:8px;justify-content:flex-end" }, [
+      button("Cancel", () => dialog.close()),
+      button("Create", create, { variant: "primary", icon: "lucide:Plus" }),
+    ]),
+    width: "min(30rem,100%)",
+  });
+  field.focus();
 }
 
 /**
